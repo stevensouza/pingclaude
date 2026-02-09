@@ -1,0 +1,20 @@
+# Build artifacts
+.build/
+*.o
+*.swp
+
+# App bundles
+*.app
+
+# macOS system files
+.DS_Store
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+
+# Swift Package Manager
+.swiftpm/
+Packages/
+
+# Claude Code local settings
+.claude/
