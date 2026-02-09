@@ -184,10 +184,14 @@ class UsageVelocityTracker: ObservableObject {
         return snapshots
     }
 
-    /// Detect which model is active by comparing 7-day breakdown changes
+    /// Detect which model is active by comparing 7-day breakdown changes.
+    /// Returns nil when per-model data isn't available (recalculate will use velocity heuristic).
     private func detectActiveModel(newSnapshots: [ModelSnapshot], sessionDelta: Double) -> String? {
         guard let lastSample = samples.last else { return nil }
         let oldSnapshots = lastSample.modelSnapshots
+
+        // If neither old nor new have model data, return nil — let velocity heuristic handle it
+        guard !newSnapshots.isEmpty || !oldSnapshots.isEmpty else { return nil }
 
         // Build lookup of old values
         var oldValues: [String: Double] = [:]
@@ -209,13 +213,22 @@ class UsageVelocityTracker: ObservableObject {
             }
         }
 
-        // If session usage went up but no per-model breakdown moved, infer Haiku
-        if bestModel == nil && sessionDelta > 0.5 {
+        // Only infer Haiku when we DO have snapshot data but no model moved
+        // (Haiku has no 7-day breakdown, so session climbing with no model change = Haiku)
+        if bestModel == nil && !newSnapshots.isEmpty && sessionDelta > 0.5 {
             bestModel = "haiku"
         }
 
-        // If we detected something, return it. Otherwise keep previous detection.
         return bestModel ?? lastSample.detectedModel
+    }
+
+    /// Infer model from observed velocity when API doesn't provide per-model breakdowns.
+    /// Based on pricing ratios: Opus burns ~15x faster than Haiku, Sonnet ~3x.
+    /// For a 5h session (20%/hr baseline): Opus >50%/hr, Sonnet 15-50%/hr, Haiku <15%/hr.
+    private func inferModelFromVelocity(_ velocity: Double) -> String {
+        if velocity > 50 { return "opus" }
+        if velocity > 15 { return "sonnet" }
+        return "haiku"
     }
 
     // MARK: - Pruning
@@ -260,8 +273,20 @@ class UsageVelocityTracker: ObservableObject {
         })
         allTimeVelocity = computeVelocity(from: samples)
 
-        // Update detected model from latest sample
-        detectedModel = samples.last?.detectedModel
+        // Update detected model: use snapshot-based detection if available,
+        // otherwise fall back to velocity-based heuristic
+        let snapshotDetection = samples.last?.detectedModel
+        let hasAnySnapshots = sessionSamples.contains { !$0.modelSnapshots.isEmpty }
+
+        if hasAnySnapshots, let detected = snapshotDetection {
+            // Per-model API data exists — trust snapshot-based detection
+            detectedModel = detected
+        } else if let vel = sessionVelocity, vel > 0 {
+            // No per-model data from API — infer from burn rate
+            detectedModel = inferModelFromVelocity(vel)
+        } else {
+            detectedModel = nil
+        }
 
         // Estimate time remaining based on session velocity
         if let vel = sessionVelocity, vel > 0, currentUtilization < 100 {
