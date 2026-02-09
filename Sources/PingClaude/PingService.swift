@@ -80,7 +80,7 @@ class PingService: ObservableObject {
         let cookie = "sessionKey=\(sessionKey)"
         let prompt = settingsStore.pingPrompt
         let model = settingsStore.pingModel
-        let apiModel = Constants.apiModelNames[model] ?? Constants.apiModelNames["haiku"]!
+        let apiModel = Constants.apiModelNames[model] ?? "claude-haiku-4-5-20251001"
         let startTime = Date()
         let commandDesc = "API: \(prompt) [\(model)]"
 

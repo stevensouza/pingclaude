@@ -28,7 +28,7 @@ struct PingHistoryView: View {
         let calendar = Calendar.current
         let now = Date()
         let today = calendar.startOfDay(for: now)
-        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today) ?? today
 
         let dayFormatter = DateFormatter()
         dayFormatter.dateFormat = "EEE, MMM d"
@@ -56,7 +56,7 @@ struct PingHistoryView: View {
             if groups[key] == nil {
                 groups[key] = (label: label, sortDate: recordDay, records: [])
             }
-            groups[key]!.records.append(record)
+            groups[key]?.records.append(record)
         }
 
         return groups.sorted { $0.key < $1.key }

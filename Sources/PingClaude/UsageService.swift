@@ -98,7 +98,9 @@ class UsageService: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             self?.fetchUsage()
         }
-        RunLoop.main.add(timer!, forMode: .common)
+        if let timer = timer {
+            RunLoop.main.add(timer, forMode: .common)
+        }
     }
 
     func stopPolling() {

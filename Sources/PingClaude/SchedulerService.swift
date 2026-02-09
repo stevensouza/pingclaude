@@ -77,7 +77,9 @@ class SchedulerService: ObservableObject {
             self?.firePing()
         }
         // Make sure it fires even when menus are open
-        RunLoop.main.add(timer!, forMode: .common)
+        if let timer = timer {
+            RunLoop.main.add(timer, forMode: .common)
+        }
     }
 
     private func firePing() {

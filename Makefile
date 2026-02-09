@@ -14,7 +14,15 @@ SWIFTFLAGS = -O -whole-module-optimization \
     -framework SwiftUI \
     -framework ServiceManagement
 
-.PHONY: build bundle run clean install uninstall
+.PHONY: build bundle run clean install uninstall lint lint-fix
+
+lint:
+	@echo "Running code quality scan..."
+	@swift Scripts/quality-scan.swift Sources/PingClaude
+
+lint-fix:
+	@echo "Note: Auto-fixes would require SwiftLint (macOS 13+)"
+	@echo "Manual review of issues recommended."
 
 build:
 	@echo "Compiling $(APP_NAME)..."

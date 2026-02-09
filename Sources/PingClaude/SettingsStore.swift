@@ -199,8 +199,55 @@ class SettingsStore: ObservableObject {
             } catch {
                 print("Launch at login error: \(error)")
             }
+        } else {
+            // macOS 12: manage LaunchAgent plist directly
+            let plistName = "com.pingclaude.app.plist"
+            let launchAgentsDir = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/LaunchAgents")
+            let plistDest = launchAgentsDir.appendingPathComponent(plistName)
+
+            if launchAtLogin {
+                // Create LaunchAgents dir if needed
+                try? FileManager.default.createDirectory(at: launchAgentsDir, withIntermediateDirectories: true)
+
+                // Write plist that launches the app at login
+                let plistContent = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+                  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+                <plist version="1.0">
+                <dict>
+                    <key>Label</key>
+                    <string>com.pingclaude.app</string>
+                    <key>ProgramArguments</key>
+                    <array>
+                        <string>/Applications/PingClaude.app/Contents/MacOS/PingClaude</string>
+                    </array>
+                    <key>RunAtLoad</key>
+                    <true/>
+                    <key>KeepAlive</key>
+                    <false/>
+                </dict>
+                </plist>
+                """
+                try? plistContent.write(to: plistDest, atomically: true, encoding: .utf8)
+
+                // Load agent
+                let load = Process()
+                load.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+                load.arguments = ["load", plistDest.path]
+                load.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
+                try? load.run()
+            } else {
+                // Unload and remove
+                let unload = Process()
+                unload.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+                unload.arguments = ["unload", plistDest.path]
+                unload.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
+                try? unload.run()
+                try? FileManager.default.removeItem(at: plistDest)
+            }
         }
-        // On macOS 12, use the install-launchagent.sh script manually
     }
 }
 

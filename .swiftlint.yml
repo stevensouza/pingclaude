@@ -1,0 +1,92 @@
+# SwiftLint-compatible configuration for PingClaude
+# Note: SwiftLint requires macOS Ventura+, so we use custom CodeQualityScanner instead.
+# This file documents the linting rules that should be enforced.
+
+# Rules to disable (we accept these patterns)
+disabled_rules:
+  - trailing_whitespace  # Can autofix later
+  - todo  # Allow TODOs in codebase
+  - file_length  # We have some longer files due to functionality
+
+# Rules to enable (strict checking)
+opt_in_rules:
+  - force_unwrapping  # Catch force unwraps (critical for safety)
+  - force_cast  # Unsafe type casting
+  - weak_delegate  # Prevent retain cycles
+  - unused_import  # Remove unnecessary imports
+  - empty_count  # Use isEmpty instead of count == 0
+
+# Rule configuration
+line_length:
+  warning: 150
+  error: 200
+  ignores_comments: true
+  ignores_urls: true
+
+function_body_length:
+  warning: 60
+  error: 100
+
+file_length:
+  warning: 400
+  error: 600
+
+type_body_length:
+  warning: 300
+  error: 400
+
+cyclomatic_complexity:
+  warning: 10
+  error: 15
+  ignores_case_statements: true
+
+nesting:
+  type_level:
+    warning: 2
+  statement_level:
+    warning: 4
+
+# Force unwrap detection (critical for safety)
+force_unwrapping: error
+
+# Force cast detection
+force_cast: warning
+
+# Implicitly unwrapped optionals
+implicitly_unwrapped_optional:
+  severity: warning
+
+# Weak self in closures
+weak_delegate: error
+
+# Reporting format
+reporter: "xcode"
+
+# File patterns
+included:
+  - Sources/PingClaude
+
+excluded:
+  - .build
+  - .git
+  - screenshots
+  - prototype
+  - Scripts
+
+# Custom rules (specific to PingClaude)
+custom_rules:
+  no_hardcoded_api_urls:
+    name: "Hardcoded API URLs"
+    regex: '(https?://|"api\.claude\.ai|"claude\.ai)'
+    match_kinds: string
+    severity: warning
+  no_print_debugging:
+    name: "Print Debugging"
+    regex: 'print\s*\('
+    match_kinds: identifier
+    severity: info
+  unicode_in_identifiers:
+    name: "Unicode in identifiers"
+    regex: '[^\x00-\x7F]'
+    match_kinds: identifier
+    severity: warning

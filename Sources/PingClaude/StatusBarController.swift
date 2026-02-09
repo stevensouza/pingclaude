@@ -379,7 +379,9 @@ class StatusBarController {
             self.updatePingResetLine()
             self.updateMenuBarIcon()
         }
-        RunLoop.main.add(refreshTimer!, forMode: .common)
+        if let refreshTimer = refreshTimer {
+            RunLoop.main.add(refreshTimer, forMode: .common)
+        }
     }
 
     // MARK: - Actions

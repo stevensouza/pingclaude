@@ -1,0 +1,44 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  quality:
+    runs-on: macos-12
+    name: Code Quality Scan
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Swift
+        run: swift --version
+
+      - name: Run code quality scan
+        run: make lint
+
+      - name: Upload baseline for reference
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: quality-report
+          path: .swiftlint-baseline.txt
+          retention-days: 30
+
+  build:
+    runs-on: macos-12
+    name: Build Check
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build project
+        run: make bundle
+
+      - name: Verify bundle
+        run: |
+          test -d .build/PingClaude.app || exit 1
+          echo "Bundle created successfully"
