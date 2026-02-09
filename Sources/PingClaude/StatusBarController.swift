@@ -10,6 +10,7 @@ class StatusBarController {
     private let pingHistoryStore: PingHistoryStore
     private let logStore: LogStore
     private let usageService: UsageService
+    private let velocityTracker: UsageVelocityTracker
 
     private var mainWindow: MainWindow?
     private var helpWindow: HelpWindow?
@@ -27,6 +28,8 @@ class StatusBarController {
     private var monthlySpendMenuItem: NSMenuItem!
     private var breakdownMenuItems: [NSMenuItem] = []
     private var usageErrorMenuItem: NSMenuItem!
+    private var velocityMenuItem: NSMenuItem!
+    private var budgetAdvisorMenuItem: NSMenuItem!
     private var scheduleToggleMenuItem: NSMenuItem!
 
     private let timeFormatter: DateFormatter = {
@@ -40,13 +43,15 @@ class StatusBarController {
          schedulerService: SchedulerService,
          pingHistoryStore: PingHistoryStore,
          logStore: LogStore,
-         usageService: UsageService) {
+         usageService: UsageService,
+         velocityTracker: UsageVelocityTracker) {
         self.settingsStore = settingsStore
         self.pingService = pingService
         self.schedulerService = schedulerService
         self.pingHistoryStore = pingHistoryStore
         self.logStore = logStore
         self.usageService = usageService
+        self.velocityTracker = velocityTracker
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -82,6 +87,15 @@ class StatusBarController {
         sessionResetMenuItem = NSMenuItem(title: "Resets: --", action: nil, keyEquivalent: "")
         sessionResetMenuItem.isEnabled = false
         menu.addItem(sessionResetMenuItem)
+
+        velocityMenuItem = NSMenuItem(title: "Pace: calculating...", action: nil, keyEquivalent: "")
+        velocityMenuItem.isEnabled = false
+        menu.addItem(velocityMenuItem)
+
+        budgetAdvisorMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        budgetAdvisorMenuItem.isEnabled = false
+        budgetAdvisorMenuItem.isHidden = true
+        menu.addItem(budgetAdvisorMenuItem)
 
         weeklyUsageMenuItem = NSMenuItem(title: "Weekly: --", action: nil, keyEquivalent: "")
         weeklyUsageMenuItem.isEnabled = false
@@ -234,6 +248,29 @@ class StatusBarController {
             }
             .store(in: &cancellables)
 
+        // Watch velocity tracker
+        velocityTracker.$sessionTimeRemaining
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.updateVelocityDisplay()
+                self?.updateMenuBarIcon()
+            }
+            .store(in: &cancellables)
+
+        // Watch budget advisor
+        velocityTracker.$budgetAdvisorMessage
+            .receive(on: RunLoop.main)
+            .sink { [weak self] message in
+                guard let self = self else { return }
+                if let message = message {
+                    self.budgetAdvisorMenuItem.title = "\u{1F4A1} \(message)"
+                    self.budgetAdvisorMenuItem.isHidden = false
+                } else {
+                    self.budgetAdvisorMenuItem.isHidden = true
+                }
+            }
+            .store(in: &cancellables)
+
         // Watch reset window setting
         settingsStore.$resetWindowHours
             .receive(on: RunLoop.main)
@@ -264,10 +301,15 @@ class StatusBarController {
             break // fall through to usage-based display
         }
 
-        // If we have live usage data, show "CC·44%"
+        // If we have live usage data, show "CC·44%·O" (with model indicator)
         if let usage = usageService.latestUsage {
             let pct = Int(usage.sessionUtilization)
-            button.title = "CC\u{00B7}\(pct)%"
+            if let model = velocityTracker.detectedModel {
+                let modelChar = Constants.ModelPricing.shortLabel(model)
+                button.title = "CC\u{00B7}\(pct)%\u{00B7}\(modelChar)"
+            } else {
+                button.title = "CC\u{00B7}\(pct)%"
+            }
             return
         }
 
@@ -339,6 +381,19 @@ class StatusBarController {
         }
     }
 
+    private func updateVelocityDisplay() {
+        let timeStr = velocityTracker.timeRemainingString
+        let rateStr = velocityTracker.sessionVelocityString
+        let modelTag = velocityTracker.detectedModel.map { " [\($0.capitalized)]" } ?? ""
+        if velocityTracker.sessionVelocity == nil {
+            velocityMenuItem.title = "Pace: \(rateStr)"
+        } else if let vel = velocityTracker.sessionVelocity, vel <= 0 {
+            velocityMenuItem.title = "Pace: \(rateStr)"
+        } else {
+            velocityMenuItem.title = "\u{23F1} \(timeStr) (\(rateStr))\(modelTag)"
+        }
+    }
+
     private func updatePingResetLine() {
         // Hide this estimate when live API data is available (Resets: line is better)
         guard usageService.latestUsage == nil,
@@ -376,6 +431,7 @@ class StatusBarController {
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             self.updateUsageDisplay(self.usageService.latestUsage)
+            self.updateVelocityDisplay()
             self.updatePingResetLine()
             self.updateMenuBarIcon()
         }
@@ -445,7 +501,8 @@ class StatusBarController {
             mainWindow = MainWindow(
                 settingsStore: settingsStore,
                 pingHistoryStore: pingHistoryStore,
-                usageService: usageService
+                usageService: usageService,
+                velocityTracker: velocityTracker
             )
         }
     }

@@ -5,6 +5,7 @@ struct MainTabView: View {
     let settingsStore: SettingsStore
     let pingHistoryStore: PingHistoryStore
     let usageService: UsageService
+    let velocityTracker: UsageVelocityTracker
 
     var body: some View {
         TabView(selection: $tabSelection.selectedTab) {
@@ -22,7 +23,7 @@ struct MainTabView: View {
                 }
                 .tag(MainTab.history)
 
-            ClaudeInfoView(usageService: usageService, settings: settingsStore)
+            ClaudeInfoView(usageService: usageService, settings: settingsStore, velocityTracker: velocityTracker)
                 .tabItem {
                     Image(systemName: "chart.bar")
                     Text("Claude Info")

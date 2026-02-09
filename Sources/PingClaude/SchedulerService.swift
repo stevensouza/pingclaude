@@ -7,24 +7,37 @@ class SchedulerService: ObservableObject {
     private let pingService: PingService
     private let pingHistoryStore: PingHistoryStore
     private let logStore: LogStore
+    private let usageService: UsageService
 
     @Published var nextPingTime: Date?
     @Published var isRunning = false
 
     private var timer: Timer?
+    private var resetPingTimer: Timer?
+    private var lastScheduledResetTime: Date?  // avoid re-scheduling same reset
+    private var resetPingRetryCount = 0
+    private var preResetUtilization: Double = 0  // utilization when we scheduled the reset ping
     private var cancellables = Set<AnyCancellable>()
+
+    private static let resetPingMinUtilization: Double = 20  // only fire if usage was >20%
+    private static let resetPingCoalesceWindow: TimeInterval = 120  // 2 minutes
+    private static let resetPingMaxRetries = 3
+    private static let resetPingRetryDelay: TimeInterval = 30
 
     init(settingsStore: SettingsStore,
          pingService: PingService,
          pingHistoryStore: PingHistoryStore,
-         logStore: LogStore) {
+         logStore: LogStore,
+         usageService: UsageService) {
         self.settingsStore = settingsStore
         self.pingService = pingService
         self.pingHistoryStore = pingHistoryStore
         self.logStore = logStore
+        self.usageService = usageService
 
         setupSleepWakeObservers()
         setupSettingsObservers()
+        setupResetPingObserver()
     }
 
     func start() {
@@ -237,8 +250,112 @@ class SchedulerService: ObservableObject {
         return formatter.string(from: date)
     }
 
+    // MARK: - Reset-Triggered Ping
+
+    private func setupResetPingObserver() {
+        usageService.$latestUsage
+            .compactMap { $0 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] usage in
+                self?.scheduleResetPingIfNeeded(usage)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func scheduleResetPingIfNeeded(_ usage: UsageData) {
+        guard let resetsAt = usage.sessionResetsAt else { return }
+
+        // Don't re-schedule for the same reset time
+        if let last = lastScheduledResetTime,
+           abs(resetsAt.timeIntervalSince(last)) < 60 {
+            return
+        }
+
+        // Only schedule if utilization is meaningful (>20%)
+        guard usage.sessionUtilization > Self.resetPingMinUtilization else { return }
+
+        let delay = resetsAt.timeIntervalSinceNow
+        guard delay > 0 else { return }  // reset already passed
+
+        // Cancel any previous reset ping timer
+        resetPingTimer?.invalidate()
+
+        lastScheduledResetTime = resetsAt
+        preResetUtilization = usage.sessionUtilization
+        resetPingRetryCount = 0
+
+        logStore.log("Reset ping scheduled for \(formatDate(resetsAt)) (usage at \(Int(usage.sessionUtilization))%)")
+
+        resetPingTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            self?.fireResetPing()
+        }
+        if let resetPingTimer = resetPingTimer {
+            RunLoop.main.add(resetPingTimer, forMode: .common)
+        }
+    }
+
+    private func fireResetPing() {
+        // Coalesce: if next scheduled ping is within 2 minutes, skip
+        if let nextPing = nextPingTime,
+           abs(nextPing.timeIntervalSinceNow) < Self.resetPingCoalesceWindow {
+            logStore.log("Reset ping skipped — scheduled ping is within 2 min")
+            return
+        }
+
+        logStore.log("Reset ping firing (attempt \(resetPingRetryCount + 1))")
+
+        // Refresh usage data first to get fresh numbers
+        usageService.fetchUsage()
+
+        pingService.ping { [weak self] result in
+            guard let self = self else { return }
+            self.pingHistoryStore.addPingResult(result)
+
+            let methodTag = result.method == .api ? "API" : "CLI"
+            if result.status == .success {
+                self.logStore.log("Reset ping succeeded via \(methodTag) (\(String(format: "%.1f", result.duration))s)")
+            } else {
+                self.logStore.log("Reset ping failed via \(methodTag): \(result.errorMessage ?? "unknown")")
+            }
+
+            // Check if session actually reset — usage should have dropped
+            // Wait a moment for the usage fetch to complete, then check
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                self?.checkResetAndRetryIfNeeded()
+            }
+        }
+    }
+
+    private func checkResetAndRetryIfNeeded() {
+        guard let usage = usageService.latestUsage else { return }
+
+        // If utilization dropped significantly, the reset happened
+        if usage.sessionUtilization < preResetUtilization * 0.5 ||
+           usage.sessionUtilization < Self.resetPingMinUtilization {
+            logStore.log("Session reset confirmed (now at \(Int(usage.sessionUtilization))%)")
+            return
+        }
+
+        // Still high — retry if we haven't exceeded max retries
+        resetPingRetryCount += 1
+        if resetPingRetryCount >= Self.resetPingMaxRetries {
+            logStore.log("Reset ping: max retries reached, session may not have reset yet (\(Int(usage.sessionUtilization))%)")
+            return
+        }
+
+        logStore.log("Session hasn't reset yet (\(Int(usage.sessionUtilization))%), retrying in \(Int(Self.resetPingRetryDelay))s...")
+
+        resetPingTimer = Timer.scheduledTimer(withTimeInterval: Self.resetPingRetryDelay, repeats: false) { [weak self] _ in
+            self?.fireResetPing()
+        }
+        if let resetPingTimer = resetPingTimer {
+            RunLoop.main.add(resetPingTimer, forMode: .common)
+        }
+    }
+
     deinit {
         timer?.invalidate()
+        resetPingTimer?.invalidate()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 }

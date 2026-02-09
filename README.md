@@ -76,6 +76,7 @@ To see the live percentage, configure the **Claude Web API** in Settings (see be
 - **Last ping** — When the most recent ping ran
 - **Next ping** — When the next scheduled ping will fire
 - **Session / Weekly / Extra usage** — Live usage metrics (requires Web API)
+- **Pace** — Current burn rate (%/hr) and estimated time until rate limit
 - **Ping Now** (⌘P) — Manually trigger a ping
 - **Enable Schedule** — Toggle automatic pinging on/off
 - **Settings** (⌘,) — Configure all options
@@ -126,12 +127,19 @@ Enables two features: API-based pinging (no CLI needed) and live usage tracking 
 
 A visual dashboard showing:
 - Session usage with colored progress bar (green → orange → red)
+- **Usage Pace** — burn rate (%/hr) for the current session, past week, and all time, plus estimated time remaining until you hit the rate limit. Color-coded: green (>2h left), orange (<2h), red (<1h).
 - Weekly usage with per-model breakdowns (Opus, Sonnet, Cowork, etc.)
 - Monthly extra-usage spend with credits used vs. limit
 - Reset countdowns and times
 - Auto-refreshes on the configured usage poll interval, plus a manual Refresh button
 
+Usage pace is computed from periodic usage samples stored locally. It starts showing data after at least 2 samples are collected (typically within 1-2 minutes of launching with usage polling enabled).
+
 Usage polling is free — no tokens consumed, no sessions started. Requires Claude Web API credentials to be configured in Settings.
+
+### Reset-Triggered Ping
+
+When the usage API reports a session reset time and your utilization is above 20%, PingClaude automatically schedules a ping at the exact reset moment. This ensures you start the new session window immediately. If the session hasn't actually reset yet, it retries up to 3 times with 30-second delays. This works independently of the regular schedule — even if the schedule is disabled, reset pings will fire as long as usage polling is active.
 
 ### Ping History
 
@@ -151,6 +159,7 @@ System events (scheduler start/stop, sleep/wake) are also shown inline.
 | App | `/Applications/PingClaude.app` (after `make install`) |
 | Event log | `~/Library/Logs/PingClaude/pingclaude.log` |
 | Ping history | `~/Library/Logs/PingClaude/ping_history.json` |
+| Usage samples | `~/Library/Logs/PingClaude/usage_samples.json` |
 | Settings | `~/Library/Preferences/` (via UserDefaults) |
 | LaunchAgent | `~/Library/LaunchAgents/com.pingclaude.app.plist` |
 
@@ -192,6 +201,7 @@ Sources/PingClaude/
 ├── PingService.swift       # API ping + CLI fallback with timeout
 ├── SchedulerService.swift  # Timer scheduling + sleep/wake handling
 ├── UsageService.swift      # Polls claude.ai usage API for live metrics
+├── UsageVelocityTracker.swift # Burn rate tracking (%/hr) with persistent samples
 ├── SettingsStore.swift     # UserDefaults-backed @Published config
 ├── SettingsView.swift      # SwiftUI settings form
 ├── PingHistoryStore.swift  # JSON-backed ping records

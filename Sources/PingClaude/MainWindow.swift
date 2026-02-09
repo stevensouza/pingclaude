@@ -16,12 +16,14 @@ class MainWindow {
     private let settingsStore: SettingsStore
     private let pingHistoryStore: PingHistoryStore
     private let usageService: UsageService
+    private let velocityTracker: UsageVelocityTracker
     private let tabSelection = TabSelection()
 
-    init(settingsStore: SettingsStore, pingHistoryStore: PingHistoryStore, usageService: UsageService) {
+    init(settingsStore: SettingsStore, pingHistoryStore: PingHistoryStore, usageService: UsageService, velocityTracker: UsageVelocityTracker) {
         self.settingsStore = settingsStore
         self.pingHistoryStore = pingHistoryStore
         self.usageService = usageService
+        self.velocityTracker = velocityTracker
     }
 
     func show(tab: MainTab) {
@@ -37,7 +39,8 @@ class MainWindow {
             tabSelection: tabSelection,
             settingsStore: settingsStore,
             pingHistoryStore: pingHistoryStore,
-            usageService: usageService
+            usageService: usageService,
+            velocityTracker: velocityTracker
         )
         let hostingView = NSHostingView(rootView: mainView)
 

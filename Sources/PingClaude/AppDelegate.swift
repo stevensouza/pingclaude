@@ -9,6 +9,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var pingService: PingService!
     private var schedulerService: SchedulerService!
     private var usageService: UsageService!
+    private var velocityTracker: UsageVelocityTracker!
     private var activityToken: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -23,13 +24,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         logStore = LogStore(settingsStore: settingsStore)
         pingHistoryStore = PingHistoryStore(settingsStore: settingsStore)
         pingService = PingService(settingsStore: settingsStore)
+        usageService = UsageService(settingsStore: settingsStore)
         schedulerService = SchedulerService(
             settingsStore: settingsStore,
             pingService: pingService,
             pingHistoryStore: pingHistoryStore,
-            logStore: logStore
+            logStore: logStore,
+            usageService: usageService
         )
-        usageService = UsageService(settingsStore: settingsStore)
+        velocityTracker = UsageVelocityTracker(settingsStore: settingsStore, usageService: usageService)
 
         // Initialize status bar
         statusBarController = StatusBarController(
@@ -38,7 +41,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             schedulerService: schedulerService,
             pingHistoryStore: pingHistoryStore,
             logStore: logStore,
-            usageService: usageService
+            usageService: usageService,
+            velocityTracker: velocityTracker
         )
 
         logStore.log("PingClaude started")

@@ -75,6 +75,7 @@ struct HelpView: View {
          \u{2022} Status \u{2014} Current state (Idle, Pinging, Success, Error)
          \u{2022} Last ping / Next ping \u{2014} Timing information
          \u{2022} Session / Weekly / Extra usage \u{2014} Live metrics (requires Web API)
+         \u{2022} Pace \u{2014} Current burn rate (%/hr) and time until rate limit
          \u{2022} Ping Now (\u{2318}P) \u{2014} Manually trigger a ping
          \u{2022} Enable Schedule \u{2014} Toggle automatic pinging
          \u{2022} Settings (\u{2318},) \u{2014} Configure all options
@@ -120,15 +121,33 @@ struct HelpView: View {
          """
          The Claude Info tab provides a visual dashboard of your usage:
          \u{2022} Session usage with colored progress bar (green/orange/red)
+         \u{2022} Usage Pace \u{2014} burn rate (%/hr) for current session, past week, \
+         and all time, plus estimated time remaining until rate limit. \
+         Color-coded: green (>2h), orange (<2h), red (<1h).
          \u{2022} Weekly usage and per-model breakdowns
          \u{2022} Monthly extra-usage spend
          \u{2022} Reset countdowns and times
+
+         Pace data starts showing after 2+ usage samples are collected \
+         (typically within 1\u{2013}2 minutes of launching).
 
          Data auto-refreshes on the configured poll interval and can be \
          manually refreshed with the Refresh button. Usage polling is free \
          \u{2014} no tokens consumed, no sessions started.
 
          Requires Claude Web API credentials to be configured in Settings.
+         """),
+        ("Reset-Triggered Ping",
+         """
+         When the usage API reports a session reset time and your utilization \
+         is above 20%, PingClaude automatically pings at the exact reset \
+         moment. This ensures you start the new session window immediately.
+
+         \u{2022} Retries up to 3 times (30s apart) if the session hasn't reset yet
+         \u{2022} Skips if a regular scheduled ping is within 2 minutes anyway
+         \u{2022} Works independently of the schedule \u{2014} fires as long as usage \
+         polling is active
+         \u{2022} Logged as "Reset ping" in Ping History
          """),
         ("Ping History",
          """
@@ -146,6 +165,7 @@ struct HelpView: View {
          \u{2022} Logs: ~/Library/Logs/PingClaude/
            \u{2014} pingclaude.log (text event log)
            \u{2014} ping_history.json (full ping records with responses)
+           \u{2014} usage_samples.json (velocity tracking data)
          \u{2022} Settings: ~/Library/Preferences/ (via UserDefaults)
          \u{2022} LaunchAgent: ~/Library/LaunchAgents/com.pingclaude.app.plist
          """),
@@ -160,6 +180,10 @@ struct HelpView: View {
                 Text("Automated Claude pinger for managing your token usage window.")
                     .font(.system(size: 14))
                     .foregroundColor(.secondary)
+
+                Text("Build \(Constants.buildVersion)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary.opacity(0.6))
 
                 Divider()
 
