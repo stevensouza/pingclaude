@@ -230,10 +230,15 @@ struct ClaudeInfoView: View {
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
 
-            Text("v\(Constants.buildVersion)")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.secondary.opacity(0.5))
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("PingClaude Version: v\(Constants.buildVersion)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary.opacity(0.5))
+                Text("Date Compiled: \(formattedBuildDate())")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary.opacity(0.5))
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(20)
     }
@@ -288,6 +293,37 @@ struct ClaudeInfoView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm:ss a"
         return formatter.string(from: date)
+    }
+
+    private func formattedBuildDate() -> String {
+        let version = Constants.buildVersion
+        // Version format: YYYYMMDD.HHMMSS (e.g., "20260211.064938")
+        let parts = version.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return version }
+
+        let dateStr = String(parts[0])  // "20260211"
+        let timeStr = String(parts[1])  // "064938"
+
+        guard dateStr.count == 8, timeStr.count == 6 else { return version }
+
+        let year = String(dateStr.prefix(4))
+        let month = String(dateStr.dropFirst(4).prefix(2))
+        let day = String(dateStr.dropFirst(6))
+        let hour = String(timeStr.prefix(2))
+        let minute = String(timeStr.dropFirst(2).prefix(2))
+        let second = String(timeStr.dropFirst(4))
+
+        // Format as "Feb 11, 2026 6:49:38 AM"
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate, .withFullTime]
+
+        if let date = formatter.date(from: "\(year)-\(month)-\(day)T\(hour):\(minute):\(second)Z") {
+            let displayFormatter = DateFormatter()
+            displayFormatter.dateFormat = "MMM dd, yyyy h:mm:ss a"
+            return displayFormatter.string(from: date)
+        }
+
+        return version
     }
 }
 
