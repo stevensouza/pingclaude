@@ -19,6 +19,11 @@ class SchedulerService: ObservableObject {
     private var preResetUtilization: Double = 0  // utilization when we scheduled the reset ping
     private var cancellables = Set<AnyCancellable>()
 
+    // Network retry state for wake/startup pings
+    private var networkRetryTimer: Timer?
+    private var networkRetryAttempt = 0
+    private var networkRetryContext: String = ""  // "wake" or "startup"
+
     private static let resetPingMinUtilization: Double = 20  // only fire if usage was >20%
     private static let resetPingCoalesceWindow: TimeInterval = 120  // 2 minutes
     private static let resetPingMaxRetries = 3
@@ -218,29 +223,26 @@ class SchedulerService: ObservableObject {
         logStore.log("System woke up")
         pingHistoryStore.addSystemEvent("System wake")
 
-        // Wait a few seconds for network to come up, then ping immediately
+        // Wait for network to come up, then ping with automatic retry on network failures
         DispatchQueue.main.asyncAfter(deadline: .now() + Constants.wakeDelaySeconds) { [weak self] in
             guard let self = self else { return }
 
             if self.settingsStore.pingOnWake {
-                // Always ping on wake regardless of schedule
-                self.logStore.log("Wake ping firing")
-                self.pingService.ping { [weak self] result in
-                    guard let self = self else { return }
-                    self.pingHistoryStore.addPingResult(result)
-                    if result.status == .success {
-                        self.logStore.log("Wake ping succeeded (\(String(format: "%.1f", result.duration))s)")
-                    } else {
-                        self.logStore.log("Wake ping failed: \(result.errorMessage ?? "unknown")")
-                    }
-                    // Then reschedule normally if scheduler is running
-                    if self.isRunning {
-                        self.reschedule()
-                    }
-                }
+                // Ping with automatic retry for network errors
+                self.pingWithRetry(context: "wake")
             } else if self.isRunning {
                 self.reschedule()
             }
+        }
+    }
+
+    func handleStartup() {
+        guard settingsStore.pingOnStartup else { return }
+
+        // Wait for network to come up after app launch, then ping with retry
+        DispatchQueue.main.asyncAfter(deadline: .now() + Constants.wakeDelaySeconds) { [weak self] in
+            guard let self = self else { return }
+            self.pingWithRetry(context: "startup")
         }
     }
 
@@ -353,9 +355,105 @@ class SchedulerService: ObservableObject {
         }
     }
 
+    // MARK: - Network Retry Logic
+
+    /// Check if an error message indicates a network connectivity issue (should retry)
+    private func isNetworkError(_ errorMessage: String?) -> Bool {
+        guard let error = errorMessage?.lowercased() else { return false }
+
+        let networkKeywords = [
+            "offline",
+            "timed out",
+            "timeout",
+            "network",
+            "not connected",
+            "dns",
+            "unreachable",
+            "connection failed",
+            "no internet",
+            "connection appears to be offline"
+        ]
+
+        return networkKeywords.contains { error.contains($0) }
+    }
+
+    /// Ping with automatic retry on network failures (for wake/startup)
+    private func pingWithRetry(context: String) {
+        networkRetryContext = context
+        networkRetryAttempt = 0
+        attemptPingWithRetry()
+    }
+
+    private func attemptPingWithRetry() {
+        let attemptNum = networkRetryAttempt + 1
+        let contextLabel = networkRetryContext.capitalized
+
+        logStore.log("\(contextLabel) ping attempt \(attemptNum)")
+
+        pingService.ping { [weak self] result in
+            guard let self = self else { return }
+
+            self.pingHistoryStore.addPingResult(result)
+
+            if result.status == .success {
+                self.logStore.log("\(contextLabel) ping succeeded (\(String(format: "%.1f", result.duration))s)")
+                self.networkRetryTimer?.invalidate()
+                self.networkRetryTimer = nil
+
+                // Resume normal scheduling if wake ping succeeded
+                if self.networkRetryContext == "wake" && self.isRunning {
+                    self.reschedule()
+                }
+                return
+            }
+
+            // Ping failed
+            let errorMsg = result.errorMessage ?? "unknown error"
+            self.logStore.log("\(contextLabel) ping failed: \(errorMsg)")
+
+            // Check if it's a network error and we haven't exceeded max retries
+            if self.isNetworkError(result.errorMessage) &&
+               self.networkRetryAttempt < Constants.maxNetworkRetries {
+
+                let delay = Constants.retryDelays[self.networkRetryAttempt]
+                self.networkRetryAttempt += 1
+
+                self.logStore.log("\(contextLabel) ping will retry in \(Int(delay))s (network error detected)")
+
+                self.networkRetryTimer?.invalidate()
+                self.networkRetryTimer = Timer.scheduledTimer(
+                    withTimeInterval: delay,
+                    repeats: false
+                ) { [weak self] _ in
+                    self?.attemptPingWithRetry()
+                }
+
+                if let timer = self.networkRetryTimer {
+                    RunLoop.main.add(timer, forMode: .common)
+                }
+            } else {
+                // Non-network error or max retries exceeded
+                if self.networkRetryAttempt >= Constants.maxNetworkRetries {
+                    self.logStore.log("\(contextLabel) ping: max retries reached, giving up")
+                } else {
+                    self.logStore.log("\(contextLabel) ping: non-network error, not retrying")
+                }
+
+                self.networkRetryTimer?.invalidate()
+                self.networkRetryTimer = nil
+
+                // Resume normal scheduling if it was a wake ping
+                if self.networkRetryContext == "wake" && self.isRunning {
+                    self.reschedule()
+                }
+            }
+        }
+    }
+
     deinit {
         timer?.invalidate()
         resetPingTimer?.invalidate()
+        networkRetryTimer?.invalidate()
         NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 }

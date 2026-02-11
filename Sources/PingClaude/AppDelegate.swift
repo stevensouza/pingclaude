@@ -47,19 +47,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         logStore.log("PingClaude started")
 
-        // Ping on startup if enabled
-        if settingsStore.pingOnStartup {
-            logStore.log("Startup ping firing")
-            pingService.ping { [weak self] result in
-                guard let self = self else { return }
-                self.pingHistoryStore.addPingResult(result)
-                if result.status == .success {
-                    self.logStore.log("Startup ping succeeded (\(String(format: "%.1f", result.duration))s)")
-                } else {
-                    self.logStore.log("Startup ping failed: \(result.errorMessage ?? "unknown")")
-                }
-            }
-        }
+        // Ping on startup with automatic retry (handled by SchedulerService)
+        schedulerService.handleStartup()
 
         // Start scheduler if enabled
         if settingsStore.scheduleEnabled {

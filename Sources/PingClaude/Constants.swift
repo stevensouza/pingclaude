@@ -57,7 +57,11 @@ enum Constants {
 
     // Subprocess
     static let pingTimeoutSeconds: TimeInterval = 30
-    static let wakeDelaySeconds: TimeInterval = 5
+    static let wakeDelaySeconds: TimeInterval = 15  // Increased for VPN connection time
+
+    // Retry configuration for wake/startup pings (network delays, VPN connection)
+    static let maxNetworkRetries = 4  // Max retry attempts after initial failure
+    static let retryDelays: [TimeInterval] = [15, 30, 60, 120]  // Exponential backoff delays
 
     // Available models
     static let availableModels = ["haiku", "sonnet", "opus"]

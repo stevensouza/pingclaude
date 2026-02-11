@@ -96,8 +96,8 @@ struct HelpView: View {
          \u{2022} Enable \u{2014} Turn automatic pinging on/off
          \u{2022} Mode \u{2014} "Run all day" or "Time window" (specific hours)
          \u{2022} Interval \u{2014} Time between pings (15 min to 4 hours)
-         \u{2022} Ping on startup \u{2014} Fire a ping when the app first launches
-         \u{2022} Ping on wake \u{2014} Fire a ping when the computer wakes from sleep
+         \u{2022} Ping on startup \u{2014} Fire a ping when the app first launches. Retries automatically on network errors (VPN delays, etc.).
+         \u{2022} Ping on wake \u{2014} Fire a ping when the computer wakes from sleep. Retries automatically if network unavailable.
          \u{2022} Usage poll \u{2014} How often to refresh usage data (15 sec to 5 min). Free, no tokens consumed.
          """),
         ("Claude Web API Setup",
@@ -148,6 +148,19 @@ struct HelpView: View {
          \u{2022} Works independently of the schedule \u{2014} fires as long as usage \
          polling is active
          \u{2022} Logged as "Reset ping" in Ping History
+         """),
+        ("Network Retry on Wake & Startup",
+         """
+         When your computer wakes from sleep or the app starts, network may \
+         not be immediately ready (especially with VPN). PingClaude \
+         automatically retries with exponential backoff:
+
+         \u{2022} Wait 15 seconds for network/VPN to initialize
+         \u{2022} If network error: retry after 15s, 30s, 60s, 120s
+         \u{2022} Max coverage: ~5.5 minutes from wake/startup
+         \u{2022} Only retries network errors (timeout, offline, DNS)
+         \u{2022} Auth errors fail immediately (no retry)
+         \u{2022} All attempts logged in Ping History
          """),
         ("Ping History",
          """

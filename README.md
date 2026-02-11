@@ -102,8 +102,8 @@ Settings, Ping History, and Claude Info share a single tabbed window. Opening an
 - **Enable** — Turn automatic pinging on/off
 - **Mode** — "Run all day" (pings whenever awake) or "Time window" (specific hours only)
 - **Interval** — Time between pings (15 minutes to 4 hours)
-- **Ping on startup** — Immediately ping when the app first launches
-- **Ping on wake** — Immediately ping when your computer wakes from sleep
+- **Ping on startup** — Immediately ping when the app first launches. If network is unavailable, retries automatically with exponential backoff (15s, 30s, 60s, 120s) for up to 5 minutes.
+- **Ping on wake** — Immediately ping when your computer wakes from sleep. If network is unavailable (common with VPN), retries automatically with exponential backoff for up to 5 minutes.
 - **Usage poll** — How often to refresh usage data (15 sec to 5 min, default: 1 min). This is free — no tokens consumed, no sessions started.
 
 **Token Window:**
@@ -140,6 +140,21 @@ Usage polling is free — no tokens consumed, no sessions started. Requires Clau
 ### Reset-Triggered Ping
 
 When the usage API reports a session reset time and your utilization is above 20%, PingClaude automatically schedules a ping at the exact reset moment. This ensures you start the new session window immediately. If the session hasn't actually reset yet, it retries up to 3 times with 30-second delays. This works independently of the regular schedule — even if the schedule is disabled, reset pings will fire as long as usage polling is active.
+
+### Network Retry on Wake/Startup
+
+When your computer wakes from sleep or the app starts up, network connectivity may not be immediately available — especially with VPNs like Surfshark that take time to establish. Instead of failing on the first timeout, PingClaude automatically retries with exponential backoff:
+
+- **First attempt** after 15 seconds (wait for network/VPN to initialize)
+- **Retry 1** after 15s delay (if network error detected)
+- **Retry 2** after 30s delay
+- **Retry 3** after 60s delay
+- **Retry 4** after 120s delay
+- **Max coverage** ~5.5 minutes from wake/startup
+
+Only network-related errors (timeout, offline, DNS, connection failed) trigger retries. Auth errors fail immediately and are not retried. All retry attempts are logged in Ping History so you can see what happened.
+
+This ensures reliable pinging even when boot/wake connectivity is delayed.
 
 ### Ping History
 
