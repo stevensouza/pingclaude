@@ -45,6 +45,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             velocityTracker: velocityTracker
         )
 
+        // Check if we restarted after a crash
+        checkCrashRecovery()
+
         logStore.log("PingClaude started")
 
         // Ping on startup with automatic retry (handled by SchedulerService)
@@ -58,6 +61,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Start usage polling if configured
         if settingsStore.hasUsageAPIConfig {
             usageService.startPolling()
+        }
+    }
+
+    private func checkCrashRecovery() {
+        let crashLogPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/PingClaude/crash.log")
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: crashLogPath.path),
+              let modDate = attrs[.modificationDate] as? Date else { return }
+        if Date().timeIntervalSince(modDate) < 60 {
+            logStore.log("Restarted after crash — see ~/Library/Logs/PingClaude/crash.log for details")
         }
     }
 

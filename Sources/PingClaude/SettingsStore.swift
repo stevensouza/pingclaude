@@ -226,7 +226,11 @@ class SettingsStore: ObservableObject {
                     <key>RunAtLoad</key>
                     <true/>
                     <key>KeepAlive</key>
-                    <false/>
+                    <true/>
+                    <key>ThrottleInterval</key>
+                    <integer>10</integer>
+                    <key>StandardErrorPath</key>
+                    <string>\(NSHomeDirectory())/Library/Logs/PingClaude/launchd-stderr.log</string>
                 </dict>
                 </plist>
                 """
