@@ -7,6 +7,7 @@ RESOURCES_DIR = $(CONTENTS)/Resources
 
 SRC_DIR = Sources/PingClaude
 SOURCES = $(wildcard $(SRC_DIR)/*.swift)
+TEST_SOURCES = $(filter-out $(SRC_DIR)/main.swift, $(SOURCES))
 
 SWIFTC = swiftc
 SWIFTFLAGS = -O -whole-module-optimization \
@@ -14,7 +15,14 @@ SWIFTFLAGS = -O -whole-module-optimization \
     -framework SwiftUI \
     -framework ServiceManagement
 
-.PHONY: build bundle run clean install uninstall deploy lint lint-fix
+.PHONY: build bundle run clean install uninstall deploy lint lint-fix test
+
+test: build
+	@echo "Running tests..."
+	@$(SWIFTC) $(SWIFTFLAGS) $(TEST_SOURCES) Tests/PingClaudeTests.swift -o $(BUILD_DIR)/PingClaudeTests
+	@$(BUILD_DIR)/PingClaudeTests
+	@rm $(BUILD_DIR)/PingClaudeTests
+	@echo "Tests complete."
 
 lint:
 	@echo "Running code quality scan..."
@@ -27,9 +35,9 @@ lint-fix:
 build:
 	@echo "Compiling $(APP_NAME)..."
 	@mkdir -p $(BUILD_DIR)
-	@echo 'extension Constants { static let buildVersion = "$(shell date +%Y%m%d.%H%M%S)" }' > $(BUILD_DIR)/BuildVersion.swift
-	$(SWIFTC) $(SWIFTFLAGS) $(SOURCES) $(BUILD_DIR)/BuildVersion.swift -o $(BUILD_DIR)/$(APP_NAME)
-	@echo "Build succeeded. Version: $$(cat $(BUILD_DIR)/BuildVersion.swift | grep -o '"[^"]*"')"
+	@echo 'extension Constants { static let buildVersion = "$(shell date +%Y%m%d.%H%M%S)" }' > $(SRC_DIR)/BuildVersion.swift
+	$(SWIFTC) $(SWIFTFLAGS) $(SOURCES) -o $(BUILD_DIR)/$(APP_NAME)
+	@echo "Build succeeded. Version: $$(cat $(SRC_DIR)/BuildVersion.swift | grep -o '"[^"]*"')"
 
 bundle: build
 	@echo "Assembling $(APP_NAME).app bundle..."

@@ -316,7 +316,7 @@ class PingService: ObservableObject {
     // MARK: - SSE Parsing
 
     /// Parse SSE event stream. Returns (collected response text, optional usage data).
-    private func parseSSEResponse(_ data: Data) -> (String, PingUsageData?) {
+    func parseSSEResponse(_ data: Data) -> (String, PingUsageData?) {
         guard let body = String(data: data, encoding: .utf8) else {
             return ("", nil)
         }
@@ -380,7 +380,7 @@ class PingService: ObservableObject {
     }
 
     /// Extract text from a content_block_delta SSE data payload
-    private func extractDeltaText(from json: String) -> String? {
+    func extractDeltaText(from json: String) -> String? {
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let delta = obj["delta"] as? [String: Any],
@@ -391,7 +391,7 @@ class PingService: ObservableObject {
     }
 
     /// Parse message_limit SSE event for usage data
-    private func parseMessageLimit(from json: String) -> PingUsageData? {
+    func parseMessageLimit(from json: String) -> PingUsageData? {
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
@@ -571,7 +571,7 @@ class PingService: ObservableObject {
         }
     }
 
-    private func extractSessionKey(from setCookie: String) -> String? {
+    func extractSessionKey(from setCookie: String) -> String? {
         let parts = setCookie.components(separatedBy: ";")
         for part in parts {
             let trimmed = part.trimmingCharacters(in: .whitespaces)

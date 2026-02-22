@@ -18,3 +18,4 @@ Packages/
 
 # Claude Code local settings
 .claude/
+Sources/PingClaude/BuildVersion.swift
