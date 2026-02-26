@@ -51,6 +51,23 @@ struct ClaudeInfoView: View {
     @ViewBuilder
     private func usageDashboard(_ usage: UsageData) -> some View {
         VStack(alignment: .leading, spacing: 16) {
+            // Plan Tier
+            if let plan = usageService.planTier {
+                HStack(spacing: 8) {
+                    Text("Claude \(plan.description)")
+                        .font(.system(size: 18, weight: .bold))
+                    Spacer()
+                    Text(planBadgeText(plan))
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(planBadgeColor(plan).opacity(0.15))
+                        .foregroundColor(planBadgeColor(plan))
+                        .cornerRadius(6)
+                }
+                .padding(.bottom, 4)
+            }
+
             // Session Usage
             GroupBox(label: Text("Session Usage").font(.headline)) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -324,6 +341,29 @@ struct ClaudeInfoView: View {
         }
 
         return version
+    }
+
+    private func planBadgeText(_ plan: PlanTier) -> String {
+        switch plan {
+        case .free: return "Free Tier"
+        case .pro: return "Pro"
+        case .max5x: return "Max 5x"
+        case .max20x: return "Max 20x"
+        case .team: return "Team"
+        case .enterprise: return "Enterprise"
+        case .unknown: return "Unknown"
+        }
+    }
+
+    private func planBadgeColor(_ plan: PlanTier) -> Color {
+        switch plan {
+        case .free: return .secondary
+        case .pro: return .blue
+        case .max5x, .max20x: return .purple
+        case .team: return .green
+        case .enterprise: return .orange
+        case .unknown: return .secondary
+        }
     }
 }
 

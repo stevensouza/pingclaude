@@ -30,6 +30,45 @@ struct SpendResponse: Codable {
     let is_enabled: Bool?
 }
 
+/// Claude subscription plan tier
+enum PlanTier: String, CustomStringConvertible {
+    case free = "Free"
+    case pro = "Pro"
+    case max5x = "Max (5x)"
+    case max20x = "Max (20x)"
+    case team = "Team"
+    case enterprise = "Enterprise"
+    case unknown = "Unknown"
+
+    var description: String { rawValue }
+
+    /// Parse from API response fields
+    static func from(capabilities: [String]?, rateLimitTier: String?) -> PlanTier {
+        let tier = rateLimitTier?.lowercased() ?? ""
+        let caps = capabilities ?? []
+
+        // Check for Max tiers via rate_limit_tier
+        if tier.contains("max_20x") { return .max20x }
+        if tier.contains("max_5x") { return .max5x }
+        // Check capabilities for max/pro/team/enterprise
+        if caps.contains("claude_max") { return .max5x } // default max is 5x
+        if caps.contains("enterprise") { return .enterprise }
+        if caps.contains("team") { return .team }
+        if caps.contains("claude_pro") { return .pro }
+        // Free tier has only basic capabilities
+        if caps.contains("chat") && caps.count <= 1 { return .free }
+        if caps.isEmpty { return .free }
+        return .unknown
+    }
+}
+
+/// Partial decode of organization API response
+struct OrgResponse: Codable {
+    let capabilities: [String]?
+    let rate_limit_tier: String?
+    let name: String?
+}
+
 struct UsageData {
     let sessionUtilization: Double   // 0-100
     let sessionResetsAt: Date?
@@ -68,6 +107,7 @@ class UsageService: ObservableObject {
 
     @Published var latestUsage: UsageData?
     @Published var lastError: String?
+    @Published var planTier: PlanTier?
 
     private let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -88,6 +128,7 @@ class UsageService: ObservableObject {
 
     func startPolling() {
         stopPolling()
+        planTier = nil  // Re-fetch plan on credential change
         guard settingsStore.hasUsageAPIConfig else { return }
 
         // Fetch immediately
@@ -117,6 +158,10 @@ class UsageService: ObservableObject {
         // Fetch both usage and spend data in parallel
         fetchUsageData(orgId: orgId, cookie: cookie)
         fetchSpendData(orgId: orgId, cookie: cookie)
+        // Only fetch plan info once per polling session (it rarely changes)
+        if planTier == nil {
+            fetchPlanInfo(orgId: orgId, cookie: cookie)
+        }
     }
 
     private func fetchUsageData(orgId: String, cookie: String) {
@@ -240,6 +285,39 @@ class UsageService: ObservableObject {
                         monthlyUsedCents: decoded.used_credits,
                         outOfCredits: decoded.out_of_credits,
                         fetchedAt: existing.fetchedAt
+                    )
+                }
+            }
+        }.resume()
+    }
+
+    private func fetchPlanInfo(orgId: String, cookie: String) {
+        let urlString = "\(Constants.usageAPIBase)/\(orgId)"
+        guard let url = URL(string: urlString) else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(cookie, forHTTPHeaderField: "Cookie")
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                guard let httpResponse = response as? HTTPURLResponse,
+                      httpResponse.statusCode == 200,
+                      let data = data else { return }
+
+                // Update session key if server sends a different one
+                if let setCookie = httpResponse.value(forHTTPHeaderField: "Set-Cookie"),
+                   let newKey = self.extractSessionKey(from: setCookie),
+                   newKey != self.settingsStore.claudeSessionKey {
+                    self.settingsStore.claudeSessionKey = newKey
+                }
+
+                if let decoded = try? JSONDecoder().decode(OrgResponse.self, from: data) {
+                    self.planTier = PlanTier.from(
+                        capabilities: decoded.capabilities,
+                        rateLimitTier: decoded.rate_limit_tier
                     )
                 }
             }
