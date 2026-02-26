@@ -43,27 +43,29 @@ enum PlanTier: String, CustomStringConvertible {
     var description: String { rawValue }
 
     /// Parse from API response fields
-    static func from(billingType: String?, activeFlags: [String]?) -> PlanTier {
-        // Check active_flags first for Max tiers
-        if let flags = activeFlags {
-            if flags.contains("max_20x") { return .max20x }
-            if flags.contains("max_5x") { return .max5x }
-        }
-        // Fall back to billing_type
-        switch billingType?.lowercased() {
-        case "enterprise": return .enterprise
-        case "team": return .team
-        case "pro", "individual_pro": return .pro
-        case "free", nil: return .free
-        default: return .unknown
-        }
+    static func from(capabilities: [String]?, rateLimitTier: String?) -> PlanTier {
+        let tier = rateLimitTier?.lowercased() ?? ""
+        let caps = capabilities ?? []
+
+        // Check for Max tiers via rate_limit_tier
+        if tier.contains("max_20x") { return .max20x }
+        if tier.contains("max_5x") { return .max5x }
+        // Check capabilities for max/pro/team/enterprise
+        if caps.contains("claude_max") { return .max5x } // default max is 5x
+        if caps.contains("enterprise") { return .enterprise }
+        if caps.contains("team") { return .team }
+        if caps.contains("claude_pro") { return .pro }
+        // Free tier has only basic capabilities
+        if caps.contains("chat") && caps.count <= 1 { return .free }
+        if caps.isEmpty { return .free }
+        return .unknown
     }
 }
 
 /// Partial decode of organization API response
 struct OrgResponse: Codable {
-    let billing_type: String?
-    let active_flags: [String]?
+    let capabilities: [String]?
+    let rate_limit_tier: String?
     let name: String?
 }
 
@@ -312,15 +314,10 @@ class UsageService: ObservableObject {
                     self.settingsStore.claudeSessionKey = newKey
                 }
 
-                // Log raw response for debugging API shape
-                if let raw = String(data: data, encoding: .utf8) {
-                    NSLog("PingClaude: Org API response: \(raw.prefix(500))")
-                }
-
                 if let decoded = try? JSONDecoder().decode(OrgResponse.self, from: data) {
                     self.planTier = PlanTier.from(
-                        billingType: decoded.billing_type,
-                        activeFlags: decoded.active_flags
+                        capabilities: decoded.capabilities,
+                        rateLimitTier: decoded.rate_limit_tier
                     )
                 }
             }
