@@ -25,7 +25,7 @@ class StatusBarController {
     private var sessionResetMenuItem: NSMenuItem!
     private var weeklyUsageMenuItem: NSMenuItem!
     private var pingResetMenuItem: NSMenuItem!
-    private var monthlySpendMenuItem: NSMenuItem!
+    private var planMenuItem: NSMenuItem!
     private var breakdownMenuItems: [NSMenuItem] = []
     private var usageErrorMenuItem: NSMenuItem!
     private var velocityMenuItem: NSMenuItem!
@@ -69,6 +69,10 @@ class StatusBarController {
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
 
+        planMenuItem = NSMenuItem(title: "Plan: --", action: nil, keyEquivalent: "")
+        planMenuItem.isEnabled = false
+        menu.addItem(planMenuItem)
+
         lastPingMenuItem = NSMenuItem(title: "Last ping: Never", action: nil, keyEquivalent: "")
         lastPingMenuItem.isEnabled = false
         menu.addItem(lastPingMenuItem)
@@ -100,10 +104,6 @@ class StatusBarController {
         weeklyUsageMenuItem = NSMenuItem(title: "Weekly: --", action: nil, keyEquivalent: "")
         weeklyUsageMenuItem.isEnabled = false
         menu.addItem(weeklyUsageMenuItem)
-
-        monthlySpendMenuItem = NSMenuItem(title: "Monthly: --", action: nil, keyEquivalent: "")
-        monthlySpendMenuItem.isEnabled = false
-        menu.addItem(monthlySpendMenuItem)
 
         pingResetMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         pingResetMenuItem.isEnabled = false
@@ -271,6 +271,19 @@ class StatusBarController {
             }
             .store(in: &cancellables)
 
+        // Watch plan tier
+        usageService.$planTier
+            .receive(on: RunLoop.main)
+            .sink { [weak self] tier in
+                guard let self = self else { return }
+                if let tier = tier {
+                    self.planMenuItem.title = "Plan: \(tier)"
+                } else {
+                    self.planMenuItem.title = "Plan: --"
+                }
+            }
+            .store(in: &cancellables)
+
         // Watch reset window setting
         settingsStore.$resetWindowHours
             .receive(on: RunLoop.main)
@@ -328,7 +341,6 @@ class StatusBarController {
             sessionUsageMenuItem.title = "Session: --"
             sessionResetMenuItem.title = "Resets: --"
             weeklyUsageMenuItem.title = "Weekly: --"
-            monthlySpendMenuItem.title = "Monthly: --"
             return
         }
 
@@ -350,16 +362,6 @@ class StatusBarController {
             weeklyUsageMenuItem.title = weeklyStr
         } else {
             weeklyUsageMenuItem.title = "Weekly: --"
-        }
-
-        // Extra usage / monthly spend
-        if let limit = usage.monthlyLimitCents, let used = usage.monthlyUsedCents, limit > 0 {
-            let pct = Int(Double(used) / Double(limit) * 100)
-            let usedDollars = String(format: "$%.2f", Double(used) / 100.0)
-            let limitDollars = String(format: "$%.2f", Double(limit) / 100.0)
-            monthlySpendMenuItem.title = "Extra usage: \(pct)% (\(usedDollars) / \(limitDollars))"
-        } else {
-            monthlySpendMenuItem.title = "Extra usage: --"
         }
 
         // Add breakdown items for non-null per-model/special limits

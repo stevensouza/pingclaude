@@ -30,6 +30,43 @@ struct SpendResponse: Codable {
     let is_enabled: Bool?
 }
 
+/// Claude subscription plan tier
+enum PlanTier: String, CustomStringConvertible {
+    case free = "Free"
+    case pro = "Pro"
+    case max5x = "Max (5x)"
+    case max20x = "Max (20x)"
+    case team = "Team"
+    case enterprise = "Enterprise"
+    case unknown = "Unknown"
+
+    var description: String { rawValue }
+
+    /// Parse from API response fields
+    static func from(billingType: String?, activeFlags: [String]?) -> PlanTier {
+        // Check active_flags first for Max tiers
+        if let flags = activeFlags {
+            if flags.contains("max_20x") { return .max20x }
+            if flags.contains("max_5x") { return .max5x }
+        }
+        // Fall back to billing_type
+        switch billingType?.lowercased() {
+        case "enterprise": return .enterprise
+        case "team": return .team
+        case "pro", "individual_pro": return .pro
+        case "free", nil: return .free
+        default: return .unknown
+        }
+    }
+}
+
+/// Partial decode of organization API response
+struct OrgResponse: Codable {
+    let billing_type: String?
+    let active_flags: [String]?
+    let name: String?
+}
+
 struct UsageData {
     let sessionUtilization: Double   // 0-100
     let sessionResetsAt: Date?
@@ -68,6 +105,7 @@ class UsageService: ObservableObject {
 
     @Published var latestUsage: UsageData?
     @Published var lastError: String?
+    @Published var planTier: PlanTier?
 
     private let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -88,6 +126,7 @@ class UsageService: ObservableObject {
 
     func startPolling() {
         stopPolling()
+        planTier = nil  // Re-fetch plan on credential change
         guard settingsStore.hasUsageAPIConfig else { return }
 
         // Fetch immediately
@@ -117,6 +156,10 @@ class UsageService: ObservableObject {
         // Fetch both usage and spend data in parallel
         fetchUsageData(orgId: orgId, cookie: cookie)
         fetchSpendData(orgId: orgId, cookie: cookie)
+        // Only fetch plan info once per polling session (it rarely changes)
+        if planTier == nil {
+            fetchPlanInfo(orgId: orgId, cookie: cookie)
+        }
     }
 
     private func fetchUsageData(orgId: String, cookie: String) {
@@ -240,6 +283,44 @@ class UsageService: ObservableObject {
                         monthlyUsedCents: decoded.used_credits,
                         outOfCredits: decoded.out_of_credits,
                         fetchedAt: existing.fetchedAt
+                    )
+                }
+            }
+        }.resume()
+    }
+
+    private func fetchPlanInfo(orgId: String, cookie: String) {
+        let urlString = "\(Constants.usageAPIBase)/\(orgId)"
+        guard let url = URL(string: urlString) else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(cookie, forHTTPHeaderField: "Cookie")
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                guard let httpResponse = response as? HTTPURLResponse,
+                      httpResponse.statusCode == 200,
+                      let data = data else { return }
+
+                // Update session key if server sends a different one
+                if let setCookie = httpResponse.value(forHTTPHeaderField: "Set-Cookie"),
+                   let newKey = self.extractSessionKey(from: setCookie),
+                   newKey != self.settingsStore.claudeSessionKey {
+                    self.settingsStore.claudeSessionKey = newKey
+                }
+
+                // Log raw response for debugging API shape
+                if let raw = String(data: data, encoding: .utf8) {
+                    NSLog("PingClaude: Org API response: \(raw.prefix(500))")
+                }
+
+                if let decoded = try? JSONDecoder().decode(OrgResponse.self, from: data) {
+                    self.planTier = PlanTier.from(
+                        billingType: decoded.billing_type,
+                        activeFlags: decoded.active_flags
                     )
                 }
             }
