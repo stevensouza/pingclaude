@@ -247,6 +247,35 @@ struct ClaudeInfoView: View {
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
 
+            // Log & Troubleshooting
+            GroupBox(label: Text("Log & Troubleshooting").font(.headline)) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("All API calls (usage, spend, plan) are logged with status codes and key values.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        logLocationRow("Event log:", path: "~/Library/Logs/PingClaude/pingclaude.log")
+                        logLocationRow("Ping history:", path: "~/Library/Logs/PingClaude/ping_history.json")
+                        logLocationRow("Usage samples:", path: "~/Library/Logs/PingClaude/usage_samples.json")
+                    }
+
+                    Divider()
+
+                    Text("Quick troubleshooting:")
+                        .font(.system(size: 11, weight: .medium))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\u{2022} Plan shows \"--\": Check Web API credentials in Settings")
+                        Text("\u{2022} Auth errors: Re-enter session key from browser")
+                        Text("\u{2022} Parse errors: API response format may have changed")
+                        Text("\u{2022} System diagnostics: Open Console.app, filter by \"PingClaude\"")
+                    }
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                }
+                .padding(.top, 4)
+            }
+
             VStack(alignment: .trailing, spacing: 2) {
                 Text("PingClaude Version: v\(Constants.buildVersion)")
                     .font(.system(size: 10, design: .monospaced))
@@ -341,6 +370,19 @@ struct ClaudeInfoView: View {
         }
 
         return version
+    }
+
+    @ViewBuilder
+    private func logLocationRow(_ label: String, path: String) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 100, alignment: .leading)
+            Text(path)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary)
+                .textSelection(.enabled)
+        }
     }
 
     private func planBadgeText(_ plan: PlanTier) -> String {

@@ -36,7 +36,7 @@ build:
 	@echo "Compiling $(APP_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	@echo 'extension Constants { static let buildVersion = "$(shell date +%Y%m%d.%H%M%S)" }' > $(SRC_DIR)/BuildVersion.swift
-	$(SWIFTC) $(SWIFTFLAGS) $(SOURCES) -o $(BUILD_DIR)/$(APP_NAME)
+	$(SWIFTC) $(SWIFTFLAGS) $(SRC_DIR)/*.swift -o $(BUILD_DIR)/$(APP_NAME)
 	@echo "Build succeeded. Version: $$(cat $(SRC_DIR)/BuildVersion.swift | grep -o '"[^"]*"')"
 
 bundle: build

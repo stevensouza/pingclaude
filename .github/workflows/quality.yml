@@ -8,11 +8,11 @@ on:
 
 jobs:
   quality:
-    runs-on: macos-12
+    runs-on: macos-14
     name: Code Quality Scan
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Swift
         run: swift --version
@@ -22,18 +22,18 @@ jobs:
 
       - name: Upload baseline for reference
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: quality-report
           path: .swiftlint-baseline.txt
           retention-days: 30
 
   build:
-    runs-on: macos-12
+    runs-on: macos-14
     name: Build Check
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Build project
         run: make bundle
