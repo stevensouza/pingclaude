@@ -4,7 +4,8 @@ import SwiftUI
 enum MainTab: Int {
     case settings = 0
     case history = 1
-    case claudeInfo = 2
+    case eventLog = 2
+    case claudeInfo = 3
 }
 
 class TabSelection: ObservableObject {
@@ -15,13 +16,15 @@ class MainWindow {
     private var window: NSWindow?
     private let settingsStore: SettingsStore
     private let pingHistoryStore: PingHistoryStore
+    private let logStore: LogStore
     private let usageService: UsageService
     private let velocityTracker: UsageVelocityTracker
     private let tabSelection = TabSelection()
 
-    init(settingsStore: SettingsStore, pingHistoryStore: PingHistoryStore, usageService: UsageService, velocityTracker: UsageVelocityTracker) {
+    init(settingsStore: SettingsStore, pingHistoryStore: PingHistoryStore, logStore: LogStore, usageService: UsageService, velocityTracker: UsageVelocityTracker) {
         self.settingsStore = settingsStore
         self.pingHistoryStore = pingHistoryStore
+        self.logStore = logStore
         self.usageService = usageService
         self.velocityTracker = velocityTracker
     }
@@ -39,6 +42,7 @@ class MainWindow {
             tabSelection: tabSelection,
             settingsStore: settingsStore,
             pingHistoryStore: pingHistoryStore,
+            logStore: logStore,
             usageService: usageService,
             velocityTracker: velocityTracker
         )

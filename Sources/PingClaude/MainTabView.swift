@@ -4,6 +4,7 @@ struct MainTabView: View {
     @ObservedObject var tabSelection: TabSelection
     let settingsStore: SettingsStore
     let pingHistoryStore: PingHistoryStore
+    let logStore: LogStore
     let usageService: UsageService
     let velocityTracker: UsageVelocityTracker
 
@@ -23,7 +24,14 @@ struct MainTabView: View {
                 }
                 .tag(MainTab.history)
 
-            ClaudeInfoView(usageService: usageService, settings: settingsStore, velocityTracker: velocityTracker)
+            EventLogView(logStore: logStore)
+                .tabItem {
+                    Image(systemName: "list.bullet.rectangle")
+                    Text("Event Log")
+                }
+                .tag(MainTab.eventLog)
+
+            ClaudeInfoView(usageService: usageService, settings: settingsStore, velocityTracker: velocityTracker, tabSelection: tabSelection)
                 .tabItem {
                     Image(systemName: "chart.bar")
                     Text("Claude Info")

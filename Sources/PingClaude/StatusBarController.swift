@@ -149,6 +149,12 @@ class StatusBarController {
         historyItem.target = self
         menu.addItem(historyItem)
 
+        // Event Log
+        let eventLogItem = NSMenuItem(title: "Event Log...", action: #selector(eventLogClicked), keyEquivalent: "l")
+        eventLogItem.keyEquivalentModifierMask = .command
+        eventLogItem.target = self
+        menu.addItem(eventLogItem)
+
         // Claude Info
         let claudeInfoItem = NSMenuItem(title: "Claude Info...", action: #selector(claudeInfoClicked), keyEquivalent: "i")
         claudeInfoItem.keyEquivalentModifierMask = .command
@@ -488,6 +494,11 @@ class StatusBarController {
         mainWindow?.show(tab: .history)
     }
 
+    @objc private func eventLogClicked() {
+        ensureMainWindow()
+        mainWindow?.show(tab: .eventLog)
+    }
+
     @objc private func claudeInfoClicked() {
         ensureMainWindow()
         mainWindow?.show(tab: .claudeInfo)
@@ -503,6 +514,7 @@ class StatusBarController {
             mainWindow = MainWindow(
                 settingsStore: settingsStore,
                 pingHistoryStore: pingHistoryStore,
+                logStore: logStore,
                 usageService: usageService,
                 velocityTracker: velocityTracker
             )

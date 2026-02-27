@@ -1,9 +1,11 @@
 import SwiftUI
+import AppKit
 
 struct ClaudeInfoView: View {
     @ObservedObject var usageService: UsageService
     @ObservedObject var settings: SettingsStore
     @ObservedObject var velocityTracker: UsageVelocityTracker
+    @ObservedObject var tabSelection: TabSelection
 
     var body: some View {
         ScrollView {
@@ -255,9 +257,10 @@ struct ClaudeInfoView: View {
                         .foregroundColor(.secondary)
 
                     VStack(alignment: .leading, spacing: 3) {
-                        logLocationRow("Event log:", path: "~/Library/Logs/PingClaude/pingclaude.log")
-                        logLocationRow("Ping history:", path: "~/Library/Logs/PingClaude/ping_history.json")
-                        logLocationRow("Usage samples:", path: "~/Library/Logs/PingClaude/usage_samples.json")
+                        let logFolder = settings.logFolder.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+                        logLocationRow("Event log:", path: "\(logFolder)/pingclaude.log", tabLink: .eventLog)
+                        logLocationRow("Ping history:", path: "\(logFolder)/ping_history.json", tabLink: .history)
+                        logLocationRow("Usage samples:", path: "\(logFolder)/usage_samples.json")
                     }
 
                     Divider()
@@ -373,15 +376,46 @@ struct ClaudeInfoView: View {
     }
 
     @ViewBuilder
-    private func logLocationRow(_ label: String, path: String) -> some View {
+    private func logLocationRow(_ label: String, path: String, tabLink: MainTab? = nil) -> some View {
         HStack(spacing: 4) {
             Text(label)
                 .font(.system(size: 11, weight: .medium))
                 .frame(width: 100, alignment: .leading)
+
             Text(path)
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.secondary)
-                .textSelection(.enabled)
+                .foregroundColor(.accentColor)
+                .underline()
+                .onTapGesture {
+                    let expandedPath = (path as NSString).expandingTildeInPath
+                    let url = URL(fileURLWithPath: expandedPath)
+                    NSWorkspace.shared.open(url)
+                }
+                .help("Click to open file")
+
+            Button(action: {
+                let expandedPath = (path as NSString).expandingTildeInPath
+                let url = URL(fileURLWithPath: expandedPath)
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }) {
+                Image(systemName: "folder")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Reveal in Finder")
+
+            if let tab = tabLink {
+                Button(action: {
+                    tabSelection.selectedTab = tab
+                }) {
+                    Image(systemName: "arrow.right.circle")
+                        .font(.system(size: 10))
+                        .foregroundColor(.accentColor)
+                }
+                .buttonStyle(.plain)
+                .help("View in app")
+            }
         }
     }
 
