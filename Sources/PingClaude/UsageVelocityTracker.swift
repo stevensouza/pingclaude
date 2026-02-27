@@ -385,29 +385,21 @@ class UsageVelocityTracker: ObservableObject {
         return Array(samples[sessionStartIndex...])
     }
 
-    /// Active-only velocity: only counts time intervals where utilization actually changed.
-    /// This gives "burn rate while actively using" not "average rate including idle time".
+    /// Average velocity: total utilization change over total elapsed time.
+    /// Returns %/hr, or nil if insufficient data.
     private func computeVelocity(from windowSamples: [UsageSample]) -> Double? {
-        guard windowSamples.count >= 2 else { return nil }
+        guard windowSamples.count >= 2,
+              let first = windowSamples.first,
+              let last = windowSamples.last else { return nil }
 
-        var activeSeconds: TimeInterval = 0
-        var activeDelta: Double = 0
-        let changeThreshold: Double = 0.1  // minimum % change to count as active
+        let totalSeconds = last.timestamp.timeIntervalSince(first.timestamp)
+        guard totalSeconds > 60 else { return nil }  // need >1 min of data
 
-        for i in 1..<windowSamples.count {
-            let prev = windowSamples[i - 1]
-            let curr = windowSamples[i]
-            let delta = curr.sessionUtilization - prev.sessionUtilization
+        let totalDelta = last.sessionUtilization - first.sessionUtilization
+        guard totalDelta > 0 else { return nil }
 
-            if delta > changeThreshold {
-                activeSeconds += curr.timestamp.timeIntervalSince(prev.timestamp)
-                activeDelta += delta
-            }
-        }
-
-        guard activeSeconds > 60, activeDelta > 0 else { return nil } // need >1 min of active data
-        let activeHours = activeSeconds / 3600
-        return activeDelta / activeHours
+        let totalHours = totalSeconds / 3600
+        return totalDelta / totalHours
     }
 
     // MARK: - Formatting Helpers
