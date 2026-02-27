@@ -24,7 +24,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         logStore = LogStore(settingsStore: settingsStore)
         pingHistoryStore = PingHistoryStore(settingsStore: settingsStore)
         pingService = PingService(settingsStore: settingsStore)
-        usageService = UsageService(settingsStore: settingsStore)
+        usageService = UsageService(settingsStore: settingsStore, logStore: logStore)
         schedulerService = SchedulerService(
             settingsStore: settingsStore,
             pingService: pingService,

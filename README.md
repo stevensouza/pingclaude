@@ -73,6 +73,7 @@ To see the live percentage, configure the **Claude Web API** in Settings (see be
 ### Menu Items
 
 - **Status** — Current state (Idle, Pinging, Success, Error)
+- **Plan** — Your Claude subscription tier (Free, Pro, Max 5x, Max 20x, Team, Enterprise). Requires Web API credentials. Shows "--" while loading or if credentials are missing.
 - **Last ping** — When the most recent ping ran
 - **Next ping** — When the next scheduled ping will fire
 - **Session / Weekly / Extra usage** — Live usage metrics (requires Web API)
@@ -126,6 +127,7 @@ Enables two features: API-based pinging (no CLI needed) and live usage tracking 
 ### Claude Info
 
 A visual dashboard showing:
+- **Plan tier** — Color-coded banner showing your Claude subscription (Free=gray, Pro=blue, Max=purple, Team=green, Enterprise=orange)
 - Session usage with colored progress bar (green → orange → red)
 - **Usage Pace** — burn rate (%/hr) for the current session, past week, and all time, plus estimated time remaining until you hit the rate limit. Color-coded: green (>2h left), orange (<2h), red (<1h).
 - Weekly usage with per-model breakdowns (Opus, Sonnet, Cowork, etc.)
@@ -175,7 +177,7 @@ System events (scheduler start/stop, sleep/wake) are also shown inline.
 | Event log | `~/Library/Logs/PingClaude/pingclaude.log` |
 | Ping history | `~/Library/Logs/PingClaude/ping_history.json` |
 | Usage samples | `~/Library/Logs/PingClaude/usage_samples.json` |
-| Settings | `~/Library/Preferences/` (via UserDefaults) |
+| Settings | `~/Library/Preferences/` (via UserDefaults — machine-specific, survives reinstalls) |
 | LaunchAgent | `~/Library/LaunchAgents/com.pingclaude.app.plist` |
 
 ## Launch at Login
@@ -251,3 +253,18 @@ Ping history is stored as JSON (`ping_history.json`):
 ```
 
 When the total log size exceeds the configured maximum (default 10 MB), the oldest half of records are automatically pruned.
+
+## Troubleshooting
+
+**Plan shows "--" in the menu:**
+Your Claude Web API credentials (Org ID and Session Key) may be missing or expired. Check Settings → Claude Web API. Credentials are stored in UserDefaults, which are machine-specific — they don't transfer when you clone the repo to a new computer.
+
+**Plan still shows "--" with valid credentials:**
+Check Console.app for diagnostic messages — filter by "PingClaude". The app retries plan detection up to 3 times. Auth errors (401/403) stop retries until you update the session key.
+
+**Usage data not showing:**
+Ensure both Org ID and Session Key are configured in Settings. Usage polling is free and doesn't consume tokens. The session key auto-refreshes on each poll, but may need to be re-entered if the app was offline for an extended period.
+
+**Viewing logs:**
+- App event log: `cat ~/Library/Logs/PingClaude/pingclaude.log`
+- System diagnostics (NSLog): Open Console.app and filter by "PingClaude", or run: `log stream --predicate 'processImagePath contains "PingClaude"' --level debug`

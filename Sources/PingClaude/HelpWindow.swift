@@ -73,6 +73,7 @@ struct HelpView: View {
         ("Menu Items",
          """
          \u{2022} Status \u{2014} Current state (Idle, Pinging, Success, Error)
+         \u{2022} Plan \u{2014} Your Claude subscription tier (Free, Pro, Max, Team, Enterprise). Shows "--" while loading or if Web API credentials are missing.
          \u{2022} Last ping / Next ping \u{2014} Timing information
          \u{2022} Session / Weekly / Extra usage \u{2014} Live metrics (requires Web API)
          \u{2022} Pace \u{2014} Current burn rate (%/hr) and time until rate limit
@@ -120,6 +121,8 @@ struct HelpView: View {
         ("Claude Info Tab",
          """
          The Claude Info tab provides a visual dashboard of your usage:
+         \u{2022} Plan tier \u{2014} Color-coded banner showing your Claude subscription \
+         (Free=gray, Pro=blue, Max=purple, Team=green, Enterprise=orange)
          \u{2022} Session usage with colored progress bar (green/orange/red)
          \u{2022} Usage Pace \u{2014} burn rate (%/hr) for current session, past week, \
          and all time, plus estimated time remaining until rate limit. \
@@ -179,8 +182,11 @@ struct HelpView: View {
            \u{2014} pingclaude.log (text event log)
            \u{2014} ping_history.json (full ping records with responses)
            \u{2014} usage_samples.json (velocity tracking data)
-         \u{2022} Settings: ~/Library/Preferences/ (via UserDefaults)
+         \u{2022} Settings: ~/Library/Preferences/ (via UserDefaults, machine-specific)
          \u{2022} LaunchAgent: ~/Library/LaunchAgents/com.pingclaude.app.plist
+
+         Troubleshooting tip: For system-level diagnostics, open Console.app \
+         and filter by "PingClaude" to see detailed error messages.
          """),
     ]
 
