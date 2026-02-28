@@ -85,87 +85,34 @@ struct ClaudeInfoView: View {
             // Usage Pace
             GroupBox(label: Text("Usage Pace").font(.headline)) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Group {
-                        // Detected model indicator
-                        HStack {
-                            Text("Active model:")
-                                .font(.system(size: 12, weight: .medium))
-                                .frame(width: 90, alignment: .leading)
-                            Text(velocityTracker.detectedModelDisplay)
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                .foregroundColor(.accentColor)
-                            Spacer()
-                        }
-
-                        HStack {
-                            Text("This session:")
-                                .font(.system(size: 12, weight: .medium))
-                                .frame(width: 90, alignment: .leading)
-                            Text(velocityTracker.sessionVelocityString)
-                                .font(.system(size: 12, design: .monospaced))
-                            Spacer()
-                            Text(velocityTracker.timeRemainingString)
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(timeRemainingColor)
-                        }
+                    HStack {
+                        Text("This session:")
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(width: 90, alignment: .leading)
+                        Text(velocityTracker.sessionVelocityString)
+                            .font(.system(size: 12, design: .monospaced))
+                        Spacer()
+                        Text(velocityTracker.timeRemainingString)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(timeRemainingColor)
                     }
 
-                    Group {
-                        HStack {
-                            Text("Past week:")
-                                .font(.system(size: 12, weight: .medium))
-                                .frame(width: 90, alignment: .leading)
-                            Text(velocityTracker.weeklyVelocityString)
-                                .font(.system(size: 12, design: .monospaced))
-                            Spacer()
-                        }
-
-                        HStack {
-                            Text("All time:")
-                                .font(.system(size: 12, weight: .medium))
-                                .frame(width: 90, alignment: .leading)
-                            Text(velocityTracker.allTimeVelocityString)
-                                .font(.system(size: 12, design: .monospaced))
-                            Spacer()
-                        }
+                    HStack {
+                        Text("Past week:")
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(width: 90, alignment: .leading)
+                        Text(velocityTracker.weeklyVelocityString)
+                            .font(.system(size: 12, design: .monospaced))
+                        Spacer()
                     }
 
-                    // Per-model time remaining table
-                    if !velocityTracker.modelTimeEstimates.isEmpty &&
-                       velocityTracker.modelTimeEstimates.contains(where: { $0.timeRemaining != nil }) {
-                        Divider()
-                        Text("Estimated time by model:")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.secondary)
-
-                        ForEach(velocityTracker.modelTimeEstimates) { estimate in
-                            HStack {
-                                Text(estimate.model.capitalized)
-                                    .font(.system(size: 12, weight: estimate.isCurrent ? .semibold : .regular))
-                                    .frame(width: 60, alignment: .leading)
-                                Text(estimate.displayString)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundColor(modelTimeColor(estimate))
-                                if estimate.isCurrent {
-                                    Text("(current)")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.secondary)
-                                }
-                                Spacer()
-                            }
-                        }
-                    }
-
-                    // Budget advisor tip
-                    if let advice = velocityTracker.budgetAdvisorMessage {
-                        HStack(spacing: 4) {
-                            Text("\u{1F4A1}")
-                                .font(.system(size: 11))
-                            Text(advice)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.orange)
-                        }
-                        .padding(.vertical, 2)
+                    HStack {
+                        Text("All time:")
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(width: 90, alignment: .leading)
+                        Text(velocityTracker.allTimeVelocityString)
+                            .font(.system(size: 12, design: .monospaced))
+                        Spacer()
                     }
 
                     Text("Based on \(velocityTracker.sessionSampleCount) samples since last reset")
@@ -294,14 +241,6 @@ struct ClaudeInfoView: View {
 
     private var timeRemainingColor: Color {
         guard let hours = velocityTracker.timeRemainingHours else { return .secondary }
-        if hours < 1 { return .red }
-        if hours < 2 { return .orange }
-        return .green
-    }
-
-    private func modelTimeColor(_ estimate: ModelTimeEstimate) -> Color {
-        guard let remaining = estimate.timeRemaining else { return .secondary }
-        let hours = remaining / 3600
         if hours < 1 { return .red }
         if hours < 2 { return .orange }
         return .green

@@ -37,46 +37,12 @@ struct UsageSample: Codable {
     }
 }
 
-/// Per-model time estimate for display in SwiftUI
-struct ModelTimeEstimate: Identifiable {
-    let model: String
-    let timeRemaining: TimeInterval?  // seconds, nil if can't estimate
-    let isCurrent: Bool
-
-    var id: String { model }
-
-    var displayString: String {
-        guard let remaining = timeRemaining else { return "—" }
-        if remaining <= 0 { return "exhausted" }
-        let hours = Int(remaining) / 3600
-        let minutes = (Int(remaining) % 3600) / 60
-        if hours > 0 {
-            return "~\(hours)h \(minutes)m"
-        }
-        return "~\(minutes)m"
-    }
-
-    var shortDisplayString: String {
-        guard let remaining = timeRemaining else { return "—" }
-        if remaining <= 0 { return "0m" }
-        let hours = Int(remaining) / 3600
-        let minutes = (Int(remaining) % 3600) / 60
-        if hours > 0 {
-            return "~\(hours)h\(minutes)m"
-        }
-        return "~\(minutes)m"
-    }
-}
-
 class UsageVelocityTracker: ObservableObject {
     @Published var sessionVelocity: Double?      // %/hr, nil if insufficient data
     @Published var weeklyVelocity: Double?       // %/hr
     @Published var allTimeVelocity: Double?      // %/hr
     @Published var sessionTimeRemaining: TimeInterval?  // seconds until 100%
     @Published var sessionSampleCount: Int = 0
-    @Published var detectedModel: String?               // "opus", "sonnet", "haiku", or nil
-    @Published var perModelTimeRemaining: [String: TimeInterval] = [:]
-    @Published var budgetAdvisorMessage: String?
 
     private let settingsStore: SettingsStore
     private let usageService: UsageService
@@ -140,18 +106,10 @@ class UsageVelocityTracker: ObservableObject {
     }
 
     private func recordSample(_ usage: UsageData) {
-        // Build model snapshots from breakdowns
-        let snapshots = extractModelSnapshots(from: usage.breakdowns)
-
-        // Detect active model by diffing with previous sample
-        let detected = detectActiveModel(newSnapshots: snapshots, sessionDelta: usage.sessionUtilization - (samples.last?.sessionUtilization ?? 0))
-
         let sample = UsageSample(
             timestamp: Date(),
             sessionUtilization: usage.sessionUtilization,
-            sessionResetsAt: usage.sessionResetsAt,
-            modelSnapshots: snapshots,
-            detectedModel: detected
+            sessionResetsAt: usage.sessionResetsAt
         )
 
         // Skip duplicate if utilization hasn't changed and last sample was recent (< 30s)
@@ -165,70 +123,6 @@ class UsageVelocityTracker: ObservableObject {
         pruneSamples()
         saveSamples()
         recalculate(currentUtilization: usage.sessionUtilization)
-    }
-
-    // MARK: - Model Detection
-
-    /// Extract per-model 7-day snapshots from API breakdowns
-    private func extractModelSnapshots(from breakdowns: [UsageBreakdown]) -> [ModelSnapshot] {
-        var snapshots: [ModelSnapshot] = []
-        for breakdown in breakdowns {
-            let label = breakdown.label.lowercased()
-            if label.contains("opus") {
-                snapshots.append(ModelSnapshot(label: "opus", utilization: breakdown.utilization))
-            } else if label.contains("sonnet") {
-                snapshots.append(ModelSnapshot(label: "sonnet", utilization: breakdown.utilization))
-            }
-            // Note: Haiku has no dedicated 7-day breakdown in the API
-        }
-        return snapshots
-    }
-
-    /// Detect which model is active by comparing 7-day breakdown changes.
-    /// Returns nil when per-model data isn't available (recalculate will use velocity heuristic).
-    private func detectActiveModel(newSnapshots: [ModelSnapshot], sessionDelta: Double) -> String? {
-        guard let lastSample = samples.last else { return nil }
-        let oldSnapshots = lastSample.modelSnapshots
-
-        // If neither old nor new have model data, return nil — let velocity heuristic handle it
-        guard !newSnapshots.isEmpty || !oldSnapshots.isEmpty else { return nil }
-
-        // Build lookup of old values
-        var oldValues: [String: Double] = [:]
-        for s in oldSnapshots {
-            oldValues[s.label] = s.utilization
-        }
-
-        // Find which model's 7-day increased the most
-        var bestModel: String?
-        var bestIncrease: Double = 0
-        let threshold: Double = 0.05  // minimum increase to count
-
-        for snapshot in newSnapshots {
-            let oldVal = oldValues[snapshot.label] ?? 0
-            let increase = snapshot.utilization - oldVal
-            if increase > threshold && increase > bestIncrease {
-                bestIncrease = increase
-                bestModel = snapshot.label
-            }
-        }
-
-        // Only infer Haiku when we DO have snapshot data but no model moved
-        // (Haiku has no 7-day breakdown, so session climbing with no model change = Haiku)
-        if bestModel == nil && !newSnapshots.isEmpty && sessionDelta > 0.5 {
-            bestModel = "haiku"
-        }
-
-        return bestModel ?? lastSample.detectedModel
-    }
-
-    /// Infer model from observed velocity when API doesn't provide per-model breakdowns.
-    /// Based on pricing ratios: Opus burns ~15x faster than Haiku, Sonnet ~3x.
-    /// For a 5h session (20%/hr baseline): Opus >50%/hr, Sonnet 15-50%/hr, Haiku <15%/hr.
-    private func inferModelFromVelocity(_ velocity: Double) -> String {
-        if velocity > 50 { return "opus" }
-        if velocity > 15 { return "sonnet" }
-        return "haiku"
     }
 
     // MARK: - Pruning
@@ -263,7 +157,6 @@ class UsageVelocityTracker: ObservableObject {
     private func recalculate(currentUtilization: Double) {
         let now = Date()
 
-        // Find session boundary: last time sessionResetsAt changed (jumped forward)
         let sessionSamples = samplesForCurrentSession()
         sessionSampleCount = sessionSamples.count
 
@@ -273,87 +166,13 @@ class UsageVelocityTracker: ObservableObject {
         })
         allTimeVelocity = computeVelocity(from: samples)
 
-        // Update detected model: use snapshot-based detection if available,
-        // otherwise fall back to velocity-based heuristic
-        let snapshotDetection = samples.last?.detectedModel
-        let hasAnySnapshots = sessionSamples.contains { !$0.modelSnapshots.isEmpty }
-
-        if hasAnySnapshots, let detected = snapshotDetection {
-            // Per-model API data exists — trust snapshot-based detection
-            detectedModel = detected
-        } else if let vel = sessionVelocity, vel > 0 {
-            // No per-model data from API — infer from burn rate
-            detectedModel = inferModelFromVelocity(vel)
-        } else {
-            detectedModel = nil
-        }
-
-        // Estimate time remaining based on session velocity
+        // Estimate time remaining based on aggregate session velocity
         if let vel = sessionVelocity, vel > 0, currentUtilization < 100 {
             let hoursLeft = (100 - currentUtilization) / vel
             sessionTimeRemaining = hoursLeft * 3600
         } else {
             sessionTimeRemaining = nil
         }
-
-        // Compute per-model time estimates
-        computePerModelEstimates(currentUtilization: currentUtilization)
-
-        // Generate budget advisor message
-        generateBudgetAdvice(currentUtilization: currentUtilization)
-    }
-
-    /// Compute estimated time remaining for each model using pricing ratios
-    private func computePerModelEstimates(currentUtilization: Double) {
-        guard let vel = sessionVelocity, vel > 0, currentUtilization < 100 else {
-            perModelTimeRemaining = [:]
-            return
-        }
-
-        let currentModel = detectedModel ?? "sonnet"  // default assumption
-        var estimates: [String: TimeInterval] = [:]
-
-        for model in Constants.availableModels {
-            let modelVel = Constants.ModelPricing.estimateVelocity(
-                observed: vel, fromModel: currentModel, toModel: model
-            )
-            if modelVel > 0 {
-                let hoursLeft = (100 - currentUtilization) / modelVel
-                estimates[model] = hoursLeft * 3600
-            }
-        }
-
-        perModelTimeRemaining = estimates
-    }
-
-    /// Generate budget advice when time is running low
-    private func generateBudgetAdvice(currentUtilization: Double) {
-        guard let currentModel = detectedModel,
-              let currentRemaining = perModelTimeRemaining[currentModel],
-              currentRemaining > 0 else {
-            budgetAdvisorMessage = nil
-            return
-        }
-
-        let thresholdSeconds = Constants.ModelPricing.advisorThresholdHours * 3600
-
-        // Only advise if current model has < threshold time remaining
-        guard currentRemaining < thresholdSeconds else {
-            budgetAdvisorMessage = nil
-            return
-        }
-
-        // Find the cheapest model that would give more time
-        for cheaperModel in Constants.ModelPricing.modelsInCostOrder {
-            if cheaperModel == currentModel { break }  // stop at current model
-            if let cheaperRemaining = perModelTimeRemaining[cheaperModel], cheaperRemaining > currentRemaining {
-                let estimate = ModelTimeEstimate(model: cheaperModel, timeRemaining: cheaperRemaining, isCurrent: false)
-                budgetAdvisorMessage = "Switch to \(cheaperModel.capitalized) for \(estimate.displayString) remaining"
-                return
-            }
-        }
-
-        budgetAdvisorMessage = nil
     }
 
     private func samplesForCurrentSession() -> [UsageSample] {
@@ -442,20 +261,4 @@ class UsageVelocityTracker: ObservableObject {
         return remaining / 3600
     }
 
-    var detectedModelDisplay: String {
-        guard let model = detectedModel else { return "unknown" }
-        return model.capitalized
-    }
-
-    /// Build model time estimates for SwiftUI display
-    var modelTimeEstimates: [ModelTimeEstimate] {
-        // Show in cost order: opus, sonnet, haiku (most expensive first)
-        Constants.ModelPricing.modelsInCostOrder.reversed().map { model in
-            ModelTimeEstimate(
-                model: model,
-                timeRemaining: perModelTimeRemaining[model],
-                isCurrent: model == detectedModel
-            )
-        }
-    }
 }

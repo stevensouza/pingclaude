@@ -76,30 +76,6 @@ enum Constants {
     // API ping timeout (longer than CLI since it involves create + send + delete)
     static let apiPingTimeoutSeconds: TimeInterval = 45
 
-    // Model pricing ratios (relative cost: Opus is 15x Haiku, Sonnet is 3x Haiku)
-    enum ModelPricing {
-        static let ratios: [String: Double] = ["opus": 15.0, "sonnet": 3.0, "haiku": 1.0]
-        static let modelsInCostOrder = ["haiku", "sonnet", "opus"]  // cheapest first
-        static let advisorThresholdHours: Double = 2.0
-
-        /// Estimate velocity on `toModel` given observed velocity on `fromModel`
-        static func estimateVelocity(observed: Double, fromModel: String, toModel: String) -> Double {
-            let fromRatio = ratios[fromModel] ?? 1.0
-            let toRatio = ratios[toModel] ?? 1.0
-            return observed * (toRatio / fromRatio)
-        }
-
-        /// Short display label for a model: "O", "S", "H"
-        static func shortLabel(_ model: String) -> String {
-            switch model {
-            case "opus": return "O"
-            case "sonnet": return "S"
-            case "haiku": return "H"
-            default: return model.prefix(1).uppercased()
-            }
-        }
-    }
-
     // Interval options (in minutes)
     static let intervalOptions: [(label: String, minutes: Int)] = [
         ("15 minutes", 15),
