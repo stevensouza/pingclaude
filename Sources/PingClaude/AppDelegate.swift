@@ -58,7 +58,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             schedulerService.start()
         }
 
-        // Start usage polling if configured
+        // Start usage polling + plan fetch if API configured
         if settingsStore.hasUsageAPIConfig {
             usageService.startPolling()
         }

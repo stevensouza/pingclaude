@@ -91,6 +91,10 @@ struct UsageData {
     }
 }
 
+/// Manages usage data via free polling of the claude.ai usage API, plus plan tier detection.
+/// Usage data is also set externally by StatusBarController from ping message_limit events.
+/// Both sources merge — whichever updates most recently wins.
+/// On API errors (429, network), silently backs off without any user-facing error display.
 class UsageService: ObservableObject {
     private let settingsStore: SettingsStore
     private var logStore: LogStore?
@@ -98,14 +102,10 @@ class UsageService: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     @Published var latestUsage: UsageData?
-    @Published var lastError: String?
     @Published var planTier: PlanTier?
     private var planFetchAttempts: Int = 0
     private var isUpdatingSessionKey = false
     private var consecutiveErrors: Int = 0
-
-    /// True when usage API is in backoff due to 429 rate limiting
-    var isBackingOff: Bool { consecutiveErrors > 0 }
 
     private let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -132,7 +132,6 @@ class UsageService: ObservableObject {
             self?.stopPolling()
         }
         wsnc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            // Wait for network to come up before resuming
             DispatchQueue.main.asyncAfter(deadline: .now() + Constants.wakeDelaySeconds) { [weak self] in
                 guard let self = self else { return }
                 if self.settingsStore.hasUsageAPIConfig {
@@ -145,12 +144,11 @@ class UsageService: ObservableObject {
 
     func startPolling() {
         stopPolling()
-        planTier = nil  // Re-fetch plan on credential change
+        planTier = nil
         planFetchAttempts = 0
         consecutiveErrors = 0
         guard settingsStore.hasUsageAPIConfig else { return }
 
-        // Fetch immediately, then schedule next poll after completion
         fetchUsage()
         scheduleNextPoll()
 
@@ -194,7 +192,6 @@ class UsageService: ObservableObject {
         let baseInterval = TimeInterval(settingsStore.usagePollingSeconds)
         let delay: TimeInterval
         if consecutiveErrors > 0 {
-            // Exponential backoff: base * 2^errors, capped at max
             let backoff = baseInterval * pow(2.0, Double(consecutiveErrors))
             delay = min(backoff, Constants.usageMaxBackoffSeconds)
         } else {
@@ -238,36 +235,33 @@ class UsageService: ObservableObject {
 
                 if let error = error {
                     self.consecutiveErrors += 1
-                    self.lastError = error.localizedDescription
-                    self.logStore?.log("Usage API error: \(error.localizedDescription)")
+                    NSLog("PingClaude: Usage API error: %@", error.localizedDescription)
                     return
                 }
 
                 guard let httpResponse = response as? HTTPURLResponse else {
-                    self.lastError = "Invalid response"
-                    self.logStore?.log("Usage API error: invalid response")
+                    self.consecutiveErrors += 1
+                    NSLog("PingClaude: Usage API invalid response")
                     return
                 }
 
                 if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-                    self.lastError = "Auth expired \u{2014} update session key in Settings"
+                    self.consecutiveErrors += 1
                     self.logStore?.log("Usage API auth error: HTTP \(httpResponse.statusCode)")
                     return
                 }
 
                 if httpResponse.statusCode == 429 {
                     self.consecutiveErrors += 1
-                    self.lastError = "Rate limited \u{2014} backing off"
                     let backoff = min(Double(self.settingsStore.usagePollingSeconds) * pow(2.0, Double(self.consecutiveErrors)), Constants.usageMaxBackoffSeconds)
-                    self.logStore?.log("Usage API rate limited (429), next poll in \(Int(backoff))s (attempt \(self.consecutiveErrors))")
+                    NSLog("PingClaude: Usage API 429, backing off %ds", Int(backoff))
                     self.scheduleNextPoll()
                     return
                 }
 
                 guard httpResponse.statusCode == 200, let data = data else {
                     self.consecutiveErrors += 1
-                    self.lastError = "HTTP \(httpResponse.statusCode)"
-                    self.logStore?.log("Usage API error: HTTP \(httpResponse.statusCode)")
+                    NSLog("PingClaude: Usage API HTTP %d", httpResponse.statusCode)
                     return
                 }
 
@@ -311,7 +305,6 @@ class UsageService: ObservableObject {
                         fetchedAt: Date()
                     )
                     self.latestUsage = usage
-                    self.lastError = nil
                     self.consecutiveErrors = 0
 
                     // Log key usage values
@@ -320,8 +313,8 @@ class UsageService: ObservableObject {
                     if let resetStr = usage.sessionResetsInString { logParts.append("resets=\(resetStr)") }
                     self.logStore?.log(logParts.joined(separator: ", "))
                 } catch {
-                    self.lastError = "Parse error: \(error.localizedDescription)"
-                    self.logStore?.log("Usage API parse error: \(error.localizedDescription)")
+                    self.consecutiveErrors += 1
+                    NSLog("PingClaude: Usage API parse error: %@", error.localizedDescription)
                 }
             }
         }.resume()
@@ -396,7 +389,6 @@ class UsageService: ObservableObject {
     }
 
     private func extractSessionKey(from setCookie: String) -> String? {
-        // Parse "sessionKey=sk-ant-...; Domain=..." from Set-Cookie header
         let parts = setCookie.components(separatedBy: ";")
         for part in parts {
             let trimmed = part.trimmingCharacters(in: .whitespaces)
