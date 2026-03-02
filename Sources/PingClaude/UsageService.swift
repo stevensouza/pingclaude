@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 
 struct UsageWindow: Codable {
     let utilization: Double
@@ -110,6 +111,8 @@ class UsageService: ObservableObject {
     @Published var lastError: String?
     @Published var planTier: PlanTier?
     private var planFetchAttempts: Int = 0
+    private var isUpdatingSessionKey = false
+    private var consecutiveErrors: Int = 0
 
     private let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -127,21 +130,52 @@ class UsageService: ObservableObject {
         self.settingsStore = settingsStore
         self.logStore = logStore
         setupObservers()
+        setupSleepWakeObservers()
+    }
+
+    private func setupSleepWakeObservers() {
+        let wsnc = NSWorkspace.shared.notificationCenter
+        wsnc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.stopPolling()
+        }
+        wsnc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            // Wait for network to come up before resuming
+            DispatchQueue.main.asyncAfter(deadline: .now() + Constants.wakeDelaySeconds) { [weak self] in
+                guard let self = self else { return }
+                if self.settingsStore.hasUsageAPIConfig {
+                    self.consecutiveErrors = 0
+                    self.startPolling()
+                }
+            }
+        }
     }
 
     func startPolling() {
         stopPolling()
         planTier = nil  // Re-fetch plan on credential change
         planFetchAttempts = 0
+        consecutiveErrors = 0
         guard settingsStore.hasUsageAPIConfig else { return }
 
-        // Fetch immediately
+        // Fetch immediately, then schedule next poll after completion
         fetchUsage()
+        scheduleNextPoll()
+    }
 
-        // Then poll on interval
-        let interval = TimeInterval(settingsStore.usagePollingSeconds)
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+    private func scheduleNextPoll() {
+        timer?.invalidate()
+        let baseInterval = TimeInterval(settingsStore.usagePollingSeconds)
+        let delay: TimeInterval
+        if consecutiveErrors > 0 {
+            // Exponential backoff: base * 2^errors, capped at max
+            let backoff = baseInterval * pow(2.0, Double(consecutiveErrors))
+            delay = min(backoff, Constants.usageMaxBackoffSeconds)
+        } else {
+            delay = baseInterval
+        }
+        timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             self?.fetchUsage()
+            self?.scheduleNextPoll()
         }
         if let timer = timer {
             RunLoop.main.add(timer, forMode: .common)
@@ -182,6 +216,7 @@ class UsageService: ObservableObject {
                 guard let self = self else { return }
 
                 if let error = error {
+                    self.consecutiveErrors += 1
                     self.lastError = error.localizedDescription
                     self.logStore?.log("Usage API error: \(error.localizedDescription)")
                     return
@@ -199,17 +234,29 @@ class UsageService: ObservableObject {
                     return
                 }
 
+                if httpResponse.statusCode == 429 {
+                    self.consecutiveErrors += 1
+                    self.lastError = "Rate limited \u{2014} backing off"
+                    let backoff = min(Double(self.settingsStore.usagePollingSeconds) * pow(2.0, Double(self.consecutiveErrors)), Constants.usageMaxBackoffSeconds)
+                    self.logStore?.log("Usage API rate limited (429), next poll in \(Int(backoff))s (attempt \(self.consecutiveErrors))")
+                    self.scheduleNextPoll()
+                    return
+                }
+
                 guard httpResponse.statusCode == 200, let data = data else {
+                    self.consecutiveErrors += 1
                     self.lastError = "HTTP \(httpResponse.statusCode)"
                     self.logStore?.log("Usage API error: HTTP \(httpResponse.statusCode)")
                     return
                 }
 
-                // Update session key if server sends a different one
+                // Update session key if server sends a different one (without triggering polling restart)
                 if let setCookie = httpResponse.value(forHTTPHeaderField: "Set-Cookie"),
                    let newKey = self.extractSessionKey(from: setCookie),
                    newKey != self.settingsStore.claudeSessionKey {
+                    self.isUpdatingSessionKey = true
                     self.settingsStore.claudeSessionKey = newKey
+                    self.isUpdatingSessionKey = false
                 }
 
                 do {
@@ -250,6 +297,7 @@ class UsageService: ObservableObject {
                     )
                     self.latestUsage = usage
                     self.lastError = nil
+                    self.consecutiveErrors = 0
 
                     // Log key usage values
                     var logParts = ["Usage API OK: session=\(Int(usage.sessionUtilization))%"]
@@ -280,11 +328,13 @@ class UsageService: ObservableObject {
                       httpResponse.statusCode == 200,
                       let data = data else { return }
 
-                // Update session key if server sends a different one
+                // Update session key if server sends a different one (without triggering polling restart)
                 if let setCookie = httpResponse.value(forHTTPHeaderField: "Set-Cookie"),
                    let newKey = self.extractSessionKey(from: setCookie),
                    newKey != self.settingsStore.claudeSessionKey {
+                    self.isUpdatingSessionKey = true
                     self.settingsStore.claudeSessionKey = newKey
+                    self.isUpdatingSessionKey = false
                 }
 
                 if let decoded = try? JSONDecoder().decode(SpendResponse.self, from: data),
@@ -353,11 +403,13 @@ class UsageService: ObservableObject {
                     return
                 }
 
-                // Update session key if server sends a different one
+                // Update session key if server sends a different one (without triggering polling restart)
                 if let setCookie = httpResponse.value(forHTTPHeaderField: "Set-Cookie"),
                    let newKey = self.extractSessionKey(from: setCookie),
                    newKey != self.settingsStore.claudeSessionKey {
+                    self.isUpdatingSessionKey = true
                     self.settingsStore.claudeSessionKey = newKey
+                    self.isUpdatingSessionKey = false
                 }
 
                 do {
@@ -402,7 +454,8 @@ class UsageService: ObservableObject {
         .dropFirst()
         .debounce(for: .seconds(1), scheduler: RunLoop.main)
         .sink { [weak self] _, _, _ in
-            self?.startPolling()
+            guard let self = self, !self.isUpdatingSessionKey else { return }
+            self.startPolling()
         }
         .store(in: &cancellables)
     }

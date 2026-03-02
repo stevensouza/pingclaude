@@ -62,6 +62,7 @@ enum Constants {
     // Retry configuration for wake/startup pings (network delays, VPN connection)
     static let maxNetworkRetries = 4  // Max retry attempts after initial failure
     static let retryDelays: [TimeInterval] = [15, 30, 60, 120]  // Exponential backoff delays
+    static let usageMaxBackoffSeconds: TimeInterval = 600  // 10 min max backoff for usage polling
 
     // Available models
     static let availableModels = ["haiku", "sonnet", "opus"]
