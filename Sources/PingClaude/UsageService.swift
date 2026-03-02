@@ -24,13 +24,6 @@ struct UsageBreakdown {
     let resetsAt: Date?
 }
 
-struct SpendResponse: Codable {
-    let monthly_credit_limit: Int?
-    let used_credits: Int?
-    let out_of_credits: Bool?
-    let is_enabled: Bool?
-}
-
 /// Claude subscription plan tier
 enum PlanTier: String, CustomStringConvertible {
     case free = "Free"
@@ -76,9 +69,6 @@ struct UsageData {
     let weeklyUtilization: Double?   // 0-100
     let weeklyResetsAt: Date?
     let breakdowns: [UsageBreakdown] // per-model, cowork, extra — only non-null entries
-    let monthlyLimitCents: Int?      // e.g. 5000 = $50
-    let monthlyUsedCents: Int?       // e.g. 2405 = $24.05
-    let outOfCredits: Bool?
     let fetchedAt: Date
 
     var sessionResetsInString: String? {
@@ -113,6 +103,9 @@ class UsageService: ObservableObject {
     private var planFetchAttempts: Int = 0
     private var isUpdatingSessionKey = false
     private var consecutiveErrors: Int = 0
+
+    /// True when usage API is in backoff due to 429 rate limiting
+    var isBackingOff: Bool { consecutiveErrors > 0 }
 
     private let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -160,6 +153,40 @@ class UsageService: ObservableObject {
         // Fetch immediately, then schedule next poll after completion
         fetchUsage()
         scheduleNextPoll()
+
+        // Fetch plan tier separately with delay to avoid simultaneous API calls
+        fetchPlanIfNeeded()
+    }
+
+    /// Fetch plan tier once at startup (skips if already known or max attempts reached)
+    func fetchPlanIfNeeded() {
+        guard settingsStore.hasUsageAPIConfig else { return }
+        guard planTier == nil && planFetchAttempts < 3 else { return }
+
+        let orgId = settingsStore.claudeOrgId
+        let cookie = "sessionKey=\(settingsStore.claudeSessionKey)"
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Constants.planFetchDelaySeconds) { [weak self] in
+            guard let self = self else { return }
+            guard self.planTier == nil && self.planFetchAttempts < 3 else { return }
+            self.fetchPlanInfo(orgId: orgId, cookie: cookie)
+        }
+    }
+
+    /// Manual refresh: fetch usage immediately, then plan after stagger delay
+    func refreshAll() {
+        guard settingsStore.hasUsageAPIConfig else { return }
+
+        let orgId = settingsStore.claudeOrgId
+        let cookie = "sessionKey=\(settingsStore.claudeSessionKey)"
+
+        fetchUsageData(orgId: orgId, cookie: cookie)
+
+        planFetchAttempts = 0
+        DispatchQueue.main.asyncAfter(deadline: .now() + Constants.planFetchDelaySeconds) { [weak self] in
+            guard let self = self else { return }
+            self.fetchPlanInfo(orgId: orgId, cookie: cookie)
+        }
     }
 
     private func scheduleNextPoll() {
@@ -193,13 +220,7 @@ class UsageService: ObservableObject {
         let orgId = settingsStore.claudeOrgId
         let cookie = "sessionKey=\(settingsStore.claudeSessionKey)"
 
-        // Fetch both usage and spend data in parallel
         fetchUsageData(orgId: orgId, cookie: cookie)
-        fetchSpendData(orgId: orgId, cookie: cookie)
-        // Fetch plan info with retry (up to 3 attempts per polling session)
-        if planTier == nil && planFetchAttempts < 3 {
-            fetchPlanInfo(orgId: orgId, cookie: cookie)
-        }
     }
 
     private func fetchUsageData(orgId: String, cookie: String) {
@@ -281,18 +302,12 @@ class UsageService: ObservableObject {
                         }
                     }
 
-                    // Preserve spend data from previous fetch if available
-                    let prevSpend = self.latestUsage
-
                     let usage = UsageData(
                         sessionUtilization: decoded.five_hour?.utilization ?? 0,
                         sessionResetsAt: self.parseDate(decoded.five_hour?.resets_at),
                         weeklyUtilization: decoded.seven_day?.utilization,
                         weeklyResetsAt: self.parseDate(decoded.seven_day?.resets_at),
                         breakdowns: breakdowns,
-                        monthlyLimitCents: prevSpend?.monthlyLimitCents,
-                        monthlyUsedCents: prevSpend?.monthlyUsedCents,
-                        outOfCredits: prevSpend?.outOfCredits,
                         fetchedAt: Date()
                     )
                     self.latestUsage = usage
@@ -307,58 +322,6 @@ class UsageService: ObservableObject {
                 } catch {
                     self.lastError = "Parse error: \(error.localizedDescription)"
                     self.logStore?.log("Usage API parse error: \(error.localizedDescription)")
-                }
-            }
-        }.resume()
-    }
-
-    private func fetchSpendData(orgId: String, cookie: String) {
-        let urlString = "\(Constants.usageAPIBase)/\(orgId)/overage_spend_limit"
-        guard let url = URL(string: urlString) else { return }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(cookie, forHTTPHeaderField: "Cookie")
-
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                guard let httpResponse = response as? HTTPURLResponse,
-                      httpResponse.statusCode == 200,
-                      let data = data else { return }
-
-                // Update session key if server sends a different one (without triggering polling restart)
-                if let setCookie = httpResponse.value(forHTTPHeaderField: "Set-Cookie"),
-                   let newKey = self.extractSessionKey(from: setCookie),
-                   newKey != self.settingsStore.claudeSessionKey {
-                    self.isUpdatingSessionKey = true
-                    self.settingsStore.claudeSessionKey = newKey
-                    self.isUpdatingSessionKey = false
-                }
-
-                if let decoded = try? JSONDecoder().decode(SpendResponse.self, from: data),
-                   let existing = self.latestUsage {
-                    // Merge spend data into existing usage data
-                    self.latestUsage = UsageData(
-                        sessionUtilization: existing.sessionUtilization,
-                        sessionResetsAt: existing.sessionResetsAt,
-                        weeklyUtilization: existing.weeklyUtilization,
-                        weeklyResetsAt: existing.weeklyResetsAt,
-                        breakdowns: existing.breakdowns,
-                        monthlyLimitCents: decoded.monthly_credit_limit,
-                        monthlyUsedCents: decoded.used_credits,
-                        outOfCredits: decoded.out_of_credits,
-                        fetchedAt: existing.fetchedAt
-                    )
-
-                    // Log spend data
-                    var spendParts = ["Spend API OK:"]
-                    if let used = decoded.used_credits, let limit = decoded.monthly_credit_limit {
-                        spendParts.append(String(format: "$%.2f/$%.2f", Double(used) / 100.0, Double(limit) / 100.0))
-                    }
-                    if decoded.out_of_credits == true { spendParts.append("OUT OF CREDITS") }
-                    self.logStore?.log(spendParts.joined(separator: " "))
                 }
             }
         }.resume()

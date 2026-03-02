@@ -112,7 +112,7 @@ Settings, Ping History, and Claude Info share a single tabbed window. Opening an
 
 **Claude Web API:**
 
-Enables two features: API-based pinging (no CLI needed) and live usage tracking (session %, weekly %, monthly spend). Usage polling is free — it reads your account metrics without consuming any tokens or starting a session. Click the `?` icon in Settings for step-by-step setup instructions.
+Enables two features: API-based pinging (no CLI needed) and live usage tracking (session %, weekly %). Usage polling is free — it reads your account metrics without consuming any tokens or starting a session. Click the `?` icon in Settings for step-by-step setup instructions.
 
 - **Org ID** — Your organization UUID. Stays constant for your account.
 - **Session Key** — Your `sessionKey` cookie. Auto-refreshes on each API poll, so once entered it stays valid.
@@ -131,7 +131,6 @@ A visual dashboard showing:
 - Session usage with colored progress bar (green → orange → red)
 - **Usage Pace** — burn rate (%/hr) for the current session, past week, and all time, plus estimated time remaining until you hit the rate limit. Color-coded: green (>2h left), orange (<2h), red (<1h).
 - Weekly usage with per-model breakdowns (Opus, Sonnet, Cowork, etc.)
-- Monthly extra-usage spend with credits used vs. limit
 - Reset countdowns and times
 - Auto-refreshes on the configured usage poll interval, plus a manual Refresh button
 

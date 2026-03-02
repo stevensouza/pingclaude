@@ -306,8 +306,10 @@ class SchedulerService: ObservableObject {
 
         logStore.log("Reset ping firing (attempt \(resetPingRetryCount + 1))")
 
-        // Refresh usage data first to get fresh numbers
-        usageService.fetchUsage()
+        // Refresh usage data unless rate-limited (don't bypass backoff)
+        if !usageService.isBackingOff {
+            usageService.fetchUsage()
+        }
 
         pingService.ping { [weak self] result in
             guard let self = self else { return }

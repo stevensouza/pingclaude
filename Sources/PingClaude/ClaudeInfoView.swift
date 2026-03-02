@@ -148,31 +148,6 @@ struct ClaudeInfoView: View {
                 .padding(.top, 4)
             }
 
-            // Monthly Spend
-            GroupBox(label: Text("Monthly Spend").font(.headline)) {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let limit = usage.monthlyLimitCents, let used = usage.monthlyUsedCents, limit > 0 {
-                        let pct = min(Double(used) / Double(limit) * 100, 100)
-                        UsageBar(
-                            label: "Extra usage credits",
-                            percentage: pct,
-                            detail: String(format: "$%.2f / $%.2f", Double(used) / 100.0, Double(limit) / 100.0)
-                        )
-
-                        if usage.outOfCredits == true {
-                            Text("Out of credits!")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.red)
-                        }
-                    } else {
-                        Text("No spend data available")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .padding(.top, 4)
-            }
-
             // Last updated
             if let error = usageService.lastError {
                 HStack(spacing: 4) {
@@ -189,7 +164,7 @@ struct ClaudeInfoView: View {
                     .foregroundColor(.secondary)
                 Spacer()
                 Button("Refresh") {
-                    usageService.fetchUsage()
+                    usageService.refreshAll()
                 }
             }
             Text("Usage polling is free \u{2014} no tokens consumed, no sessions started.")
@@ -199,7 +174,7 @@ struct ClaudeInfoView: View {
             // Log & Troubleshooting
             GroupBox(label: Text("Log & Troubleshooting").font(.headline)) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("All API calls (usage, spend, plan) are logged with status codes and key values.")
+                    Text("All API calls (usage, plan) are logged with status codes and key values.")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
 
