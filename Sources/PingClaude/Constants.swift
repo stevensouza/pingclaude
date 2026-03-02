@@ -63,6 +63,7 @@ enum Constants {
     static let maxNetworkRetries = 4  // Max retry attempts after initial failure
     static let retryDelays: [TimeInterval] = [15, 30, 60, 120]  // Exponential backoff delays
     static let usageMaxBackoffSeconds: TimeInterval = 600  // 10 min max backoff for usage polling
+    static let planFetchDelaySeconds: TimeInterval = 2  // Delay before plan tier fetch to avoid simultaneous API calls
 
     // Available models
     static let availableModels = ["haiku", "sonnet", "opus"]

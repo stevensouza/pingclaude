@@ -105,7 +105,7 @@ struct HelpView: View {
          """
          The Claude Web API enables two features:
          1. Pinging via API (no CLI needed)
-         2. Live usage tracking (session %, weekly %, monthly spend)
+         2. Live usage tracking (session %, weekly %)
 
          Usage polling is free \u{2014} it reads your account metrics without \
          consuming any tokens or starting a session. The poll interval is \
@@ -128,7 +128,6 @@ struct HelpView: View {
          and all time, plus estimated time remaining until rate limit. \
          Color-coded: green (>2h), orange (<2h), red (<1h).
          \u{2022} Weekly usage and per-model breakdowns
-         \u{2022} Monthly extra-usage spend
          \u{2022} Reset countdowns and times
 
          Pace data starts showing after 2+ usage samples are collected \

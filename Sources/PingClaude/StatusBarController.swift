@@ -435,7 +435,7 @@ class StatusBarController {
             } else {
                 self.logStore.log("Manual ping failed via \(methodTag): \(result.errorMessage ?? "unknown")")
             }
-            // Also refresh full usage data (breakdowns, monthly spend)
+            // Also refresh full usage data (breakdowns)
             self.usageService.fetchUsage()
         }
     }
@@ -451,9 +451,6 @@ class StatusBarController {
             weeklyUtilization: pingUsage.weeklyUtilization.map { $0 * 100 } ?? prev?.weeklyUtilization,
             weeklyResetsAt: pingUsage.weeklyResetsAt.map { Date(timeIntervalSince1970: $0) } ?? prev?.weeklyResetsAt,
             breakdowns: prev?.breakdowns ?? [],
-            monthlyLimitCents: prev?.monthlyLimitCents,
-            monthlyUsedCents: prev?.monthlyUsedCents,
-            outOfCredits: prev?.outOfCredits,
             fetchedAt: Date()
         )
         usageService.latestUsage = usage
