@@ -101,20 +101,20 @@ struct SettingsView: View {
 
                         HStack {
                             Text("Usage poll:")
-                                .frame(width: 60, alignment: .trailing)
+                                .frame(width: 70, alignment: .trailing)
                             Picker("", selection: $settings.usagePollingSeconds) {
-                                Text("15 sec").tag(15)
-                                Text("30 sec").tag(30)
                                 Text("1 min").tag(60)
                                 Text("2 min").tag(120)
                                 Text("5 min").tag(300)
+                                Text("10 min").tag(600)
                             }
                             .labelsHidden()
-                            .frame(width: 100)
-                            Text("How often to refresh usage data (free, no tokens)")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
+                            .frame(width: 150)
                         }
+                        Text("Free — reads usage without consuming tokens. Requires Web API credentials.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .padding(.leading, 76)
                     }
                     .padding(.top, 4)
                 }
@@ -147,7 +147,7 @@ struct SettingsView: View {
                 GroupBox {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 4) {
-                            Text("Enables API pinging and live usage tracking.")
+                            Text("Enables API pinging, plan detection, and free usage polling.")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                             Spacer()
@@ -189,14 +189,14 @@ struct SettingsView: View {
                                     .toggleStyle(.checkbox)
                                     .font(.system(size: 10))
                                     .padding(.leading, 76)
-                                Text("| Auto-refreshes on each API poll.")
+                                Text("| Auto-refreshes on each API call.")
                                     .font(.system(size: 10))
                                     .foregroundColor(.secondary)
                             }
                         }
 
                         if settings.hasUsageAPIConfig {
-                            Text("\u{2713} API ping + usage tracking active")
+                            Text("\u{2713} API ping + usage polling active")
                                 .font(.system(size: 11))
                                 .foregroundColor(.green)
                         }
@@ -285,7 +285,7 @@ struct SettingsView: View {
                 Text("sessionKey=sk-ant-sid02-\u{2026};")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.blue.opacity(0.8))
-                Text("Copy the value after sessionKey= (not the semicolon). It auto-refreshes on each API poll, so once entered it stays valid.")
+                Text("Copy the value after sessionKey= (not the semicolon). It auto-refreshes on each API call, so once entered it stays valid.")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }

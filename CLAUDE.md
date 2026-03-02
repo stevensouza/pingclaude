@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PingClaude is a macOS menu bar app that automatically pings Claude to manage the rolling 5-hour token usage window. It features:
 - Scheduled pings via Claude API or CLI fallback
-- Live usage tracking from claude.ai Web API
+- Free usage polling from claude.ai Web API (with silent backoff on errors)
 - Usage velocity tracking (burn rate in %/hr)
 - Menu bar status display with percentage
 - SwiftUI-based settings, history, and dashboard views
@@ -58,7 +58,7 @@ AppDelegate (lifecycle coordinator)
 ├── LogStore (file-backed event log)
 ├── PingHistoryStore (JSON-backed ping records)
 ├── PingService (API + CLI ping execution)
-├── UsageService (polls claude.ai for usage metrics)
+├── UsageService (free usage polling + plan tier detection)
 ├── UsageVelocityTracker (burn rate tracking with persistent samples)
 ├── SchedulerService (timer + sleep/wake handling)
 └── StatusBarController (menu bar UI + Combine observers)
@@ -101,13 +101,13 @@ Check `canPingViaAPI` to determine which path. API mode requires `orgId` + `sess
 
 `AppDelegate` calls `ProcessInfo.beginActivity(.userInitiated)` to prevent macOS App Nap from suspending timers. Critical for reliable ping scheduling.
 
-**5. Usage Polling is Free**
+**5. Free Usage Polling**
 
-`UsageService` polls claude.ai usage API without consuming tokens or starting sessions. Runs on configurable interval (default: 1 min).
+`UsageService` polls the claude.ai usage API on a configurable interval (default: 5 min) without consuming tokens. On API errors (429, network), it silently backs off with exponential delay (max 30 min) — no user-facing error display. Usage data is also set by `StatusBarController.updateUsageFromPing()` from each ping's `message_limit` SSE event. Both sources merge into `latestUsage`; whichever updates most recently wins. Plan tier is fetched separately at startup.
 
 **6. Reset-Triggered Ping**
 
-When usage API reports a session reset time and utilization > 20%, `SchedulerService` automatically schedules a ping at the exact reset moment (with retry logic). Works independently of regular schedule.
+When ping data reports a session reset time and utilization > 20%, `SchedulerService` automatically schedules a ping at the exact reset moment (with retry logic). Works independently of regular schedule.
 
 ### Data Flow
 
@@ -120,13 +120,21 @@ User/Timer → PingService.ping()
            → StatusBarController updates via Combine
 ```
 
-**Usage tracking:**
+**Usage tracking (two sources):**
 ```
-Timer → UsageService.poll()
-      → Parse API response
-      → Update @Published properties
-      → UsageVelocityTracker.recordSample()
-      → StatusBarController updates menu bar icon with %
+Source 1 (polling):
+Timer → UsageService.fetchUsage()
+      → Parse API response (free, no tokens)
+      → Update latestUsage @Published
+      → On 429: silent exponential backoff (max 30 min)
+
+Source 2 (pings):
+PingService.ping() → message_limit SSE event
+                   → StatusBarController.updateUsageFromPing()
+                   → Sets usageService.latestUsage
+
+Both → UsageVelocityTracker.recordSample()
+     → Menu bar icon updates with %
 ```
 
 **Settings changes:**

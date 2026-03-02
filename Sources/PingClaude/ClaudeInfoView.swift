@@ -42,7 +42,7 @@ struct ClaudeInfoView: View {
         VStack(spacing: 12) {
             Spacer().frame(height: 60)
             ProgressIndicator()
-            Text("Fetching usage data...")
+            Text("Waiting for first ping...")
                 .font(.system(size: 13))
                 .foregroundColor(.secondary)
             Spacer()
@@ -149,26 +149,8 @@ struct ClaudeInfoView: View {
             }
 
             // Last updated
-            if let error = usageService.lastError {
-                HStack(spacing: 4) {
-                    Text("\u{26A0}")
-                    Text(error)
-                        .font(.system(size: 11))
-                        .foregroundColor(.orange)
-                }
-            }
-
-            HStack {
-                Text("Last updated: \(formattedFetchTime(usage.fetchedAt)) \u{00B7} Auto-refreshes every \(formattedPollInterval)")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                Spacer()
-                Button("Refresh") {
-                    usageService.refreshAll()
-                }
-            }
-            Text("Usage polling is free \u{2014} no tokens consumed, no sessions started.")
-                .font(.system(size: 10))
+            Text("Last updated: \(formattedFetchTime(usage.fetchedAt)) \u{00B7} Auto-refreshes every \(formattedPollInterval) + on each ping")
+                .font(.system(size: 11))
                 .foregroundColor(.secondary)
 
             // Log & Troubleshooting
@@ -192,7 +174,6 @@ struct ClaudeInfoView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\u{2022} Plan shows \"--\": Check Web API credentials in Settings")
                         Text("\u{2022} Auth errors: Re-enter session key from browser")
-                        Text("\u{2022} Parse errors: API response format may have changed")
                         Text("\u{2022} System diagnostics: Open Console.app, filter by \"PingClaude\"")
                     }
                     .font(.system(size: 11))
@@ -247,9 +228,9 @@ struct ClaudeInfoView: View {
     }
 
     private var formattedPollInterval: String {
-        let secs = settings.usagePollingSeconds
-        if secs < 60 { return "\(secs) sec" }
-        return "\(secs / 60) min"
+        let seconds = settings.usagePollingSeconds
+        if seconds < 60 { return "\(seconds)s" }
+        return "\(seconds / 60) min"
     }
 
     private func formattedFetchTime(_ date: Date) -> String {

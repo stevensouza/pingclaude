@@ -1,12 +1,12 @@
 # PingClaude
 
-A macOS menu bar app that automatically pings Claude to manage your rolling token usage window, with optional live usage tracking from the Claude Web API.
+A macOS menu bar app that automatically pings Claude to manage your rolling token usage window, with free live usage tracking from the Claude Web API.
 
 ## Why?
 
 Claude Code has a rolling 5-hour token usage window. If you start coding at 10 AM and hit the limit at noon, you have to wait until 3 PM for those tokens to free up. By sending small automated pings earlier (e.g., 7 AM), those tokens roll off at noon, effectively resetting your window right when you need it.
 
-PingClaude automates this strategy — it runs in your menu bar, pings Claude on a schedule, and can show your real-time session utilization percentage and exact reset time.
+PingClaude automates this strategy — it runs in your menu bar, pings Claude on a schedule, and shows your real-time session utilization percentage and exact reset time.
 
 ## Screenshots
 
@@ -105,17 +105,17 @@ Settings, Ping History, and Claude Info share a single tabbed window. Opening an
 - **Interval** — Time between pings (15 minutes to 4 hours)
 - **Ping on startup** — Immediately ping when the app first launches. If network is unavailable, retries automatically with exponential backoff (15s, 30s, 60s, 120s) for up to 5 minutes.
 - **Ping on wake** — Immediately ping when your computer wakes from sleep. If network is unavailable (common with VPN), retries automatically with exponential backoff for up to 5 minutes.
-- **Usage poll** — How often to refresh usage data (15 sec to 5 min, default: 1 min). This is free — no tokens consumed, no sessions started.
+- **Usage poll** — How often to refresh usage data (1 min to 10 min, default: 5 min). This is free — no tokens consumed, no sessions started. Requires Web API credentials.
 
 **Token Window:**
 - **Reset window** — Hours until tokens roll off (default: 5 hours). Set to 0 (Disabled) if Claude removes this rolling window.
 
 **Claude Web API:**
 
-Enables two features: API-based pinging (no CLI needed) and live usage tracking (session %, weekly %). Usage polling is free — it reads your account metrics without consuming any tokens or starting a session. Click the `?` icon in Settings for step-by-step setup instructions.
+Enables three features: API-based pinging (no CLI needed), plan tier detection, and free usage polling (session %, weekly %, per-model breakdowns). Usage polling reads your account metrics without consuming any tokens or starting a session. If the usage API is temporarily unavailable, the app silently falls back to usage data from pings. Click the `?` icon in Settings for step-by-step setup instructions.
 
 - **Org ID** — Your organization UUID. Stays constant for your account.
-- **Session Key** — Your `sessionKey` cookie. Auto-refreshes on each API poll, so once entered it stays valid.
+- **Session Key** — Your `sessionKey` cookie. Auto-refreshes on each API call, so once entered it stays valid.
 
 **Storage:**
 - **Log folder** — Where ping history is saved (default: `~/Library/Logs/PingClaude/`)
@@ -132,15 +132,15 @@ A visual dashboard showing:
 - **Usage Pace** — burn rate (%/hr) for the current session, past week, and all time, plus estimated time remaining until you hit the rate limit. Color-coded: green (>2h left), orange (<2h), red (<1h).
 - Weekly usage with per-model breakdowns (Opus, Sonnet, Cowork, etc.)
 - Reset countdowns and times
-- Auto-refreshes on the configured usage poll interval, plus a manual Refresh button
+- Auto-refreshes on the configured usage poll interval, plus on each ping
 
 Usage pace is computed from periodic usage samples stored locally. It starts showing data after at least 2 samples are collected (typically within 1-2 minutes of launching with usage polling enabled).
 
-Usage polling is free — no tokens consumed, no sessions started. Requires Claude Web API credentials to be configured in Settings.
+Usage polling is free — no tokens consumed, no sessions started. If the API is temporarily unavailable, the app silently backs off and continues showing data from pings. Requires Claude Web API credentials to be configured in Settings.
 
 ### Reset-Triggered Ping
 
-When the usage API reports a session reset time and your utilization is above 20%, PingClaude automatically schedules a ping at the exact reset moment. This ensures you start the new session window immediately. If the session hasn't actually reset yet, it retries up to 3 times with 30-second delays. This works independently of the regular schedule — even if the schedule is disabled, reset pings will fire as long as usage polling is active.
+When the usage API or a ping reports a session reset time and your utilization is above 20%, PingClaude automatically schedules a ping at the exact reset moment. This ensures you start the new session window immediately. If the session hasn't actually reset yet, it retries up to 3 times with 30-second delays. This works independently of the regular schedule — even if the schedule is disabled, reset pings will fire as long as usage polling is active.
 
 ### Network Retry on Wake/Startup
 
@@ -216,7 +216,7 @@ Sources/PingClaude/
 ├── StatusBarController.swift   # Menu bar icon, menu, Combine observers
 ├── PingService.swift       # API ping + CLI fallback with timeout
 ├── SchedulerService.swift  # Timer scheduling + sleep/wake handling
-├── UsageService.swift      # Polls claude.ai usage API for live metrics
+├── UsageService.swift      # Free usage polling + plan tier detection (silent backoff)
 ├── UsageVelocityTracker.swift # Burn rate tracking (%/hr) with persistent samples
 ├── SettingsStore.swift     # UserDefaults-backed @Published config
 ├── SettingsView.swift      # SwiftUI settings form
@@ -262,7 +262,7 @@ Your Claude Web API credentials (Org ID and Session Key) may be missing or expir
 Check Console.app for diagnostic messages — filter by "PingClaude". The app retries plan detection up to 3 times. Auth errors (401/403) stop retries until you update the session key.
 
 **Usage data not showing:**
-Ensure both Org ID and Session Key are configured in Settings. Usage polling is free and doesn't consume tokens. The session key auto-refreshes on each poll, but may need to be re-entered if the app was offline for an extended period.
+Ensure both Org ID and Session Key are configured in Settings. Usage polling is free and doesn't consume tokens. If the usage API is temporarily unavailable (e.g., during Anthropic outages), the app silently backs off and shows data from pings instead. The session key auto-refreshes on each API call, but may need to be re-entered if the app was offline for an extended period.
 
 **Viewing logs:**
 - App event log: `cat ~/Library/Logs/PingClaude/pingclaude.log`

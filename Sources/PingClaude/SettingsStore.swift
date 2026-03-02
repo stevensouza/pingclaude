@@ -65,8 +65,7 @@ class SettingsStore: ObservableObject {
     @Published var usagePollingSeconds: Int {
         didSet { defaults.set(usagePollingSeconds, forKey: Constants.Keys.usagePollingSeconds) }
     }
-
-    /// Whether we have enough config to poll the usage API
+    /// Whether we have enough config for API-based pinging
     var hasUsageAPIConfig: Bool {
         !claudeSessionKey.isEmpty && !claudeOrgId.isEmpty
     }
@@ -92,7 +91,7 @@ class SettingsStore: ObservableObject {
             Constants.Keys.pingOnStartup: Constants.Defaults.pingOnStartup,
             Constants.Keys.claudeSessionKey: "",
             Constants.Keys.claudeOrgId: "",
-            Constants.Keys.usagePollingSeconds: 60
+            Constants.Keys.usagePollingSeconds: 300
         ])
 
         // Load values
@@ -115,19 +114,18 @@ class SettingsStore: ObservableObject {
         claudeSessionKey = defaults.string(forKey: Constants.Keys.claudeSessionKey) ?? ""
         claudeOrgId = defaults.string(forKey: Constants.Keys.claudeOrgId) ?? ""
 
-        // Migrate old usagePollingMinutes → usagePollingSeconds
-        if defaults.contains(key: Constants.Keys.usagePollingSeconds) {
-            usagePollingSeconds = defaults.integer(forKey: Constants.Keys.usagePollingSeconds)
-        } else if defaults.contains(key: Constants.Keys.usagePollingMinutes) {
-            usagePollingSeconds = defaults.integer(forKey: Constants.Keys.usagePollingMinutes) * 60
+        // Migrate legacy usagePollingMinutes → usagePollingSeconds
+        if let legacyMinutes = defaults.object(forKey: Constants.Keys.usagePollingMinutes) as? Int, legacyMinutes > 0 {
+            usagePollingSeconds = legacyMinutes * 60
+            defaults.removeObject(forKey: Constants.Keys.usagePollingMinutes)
         } else {
-            usagePollingSeconds = 60
+            usagePollingSeconds = defaults.integer(forKey: Constants.Keys.usagePollingSeconds)
         }
 
         // Fix zero values from register(defaults:) for integers
         if intervalMinutes == 0 { intervalMinutes = Constants.Defaults.intervalMinutes }
         if maxLogSizeMB == 0 { maxLogSizeMB = Constants.Defaults.maxLogSizeMB }
-        if usagePollingSeconds == 0 { usagePollingSeconds = 60 }
+        if usagePollingSeconds == 0 { usagePollingSeconds = 300 }
         // resetWindowHours == 0 is valid (means "no window tracking"), only fix if never set
         if !defaults.contains(key: Constants.Keys.resetWindowHours) {
             resetWindowHours = Constants.Defaults.resetWindowHours

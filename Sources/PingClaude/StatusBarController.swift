@@ -27,7 +27,6 @@ class StatusBarController {
     private var pingResetMenuItem: NSMenuItem!
     private var planMenuItem: NSMenuItem!
     private var breakdownMenuItems: [NSMenuItem] = []
-    private var usageErrorMenuItem: NSMenuItem!
     private var velocityMenuItem: NSMenuItem!
     private var scheduleToggleMenuItem: NSMenuItem!
 
@@ -103,11 +102,6 @@ class StatusBarController {
         pingResetMenuItem.isEnabled = false
         pingResetMenuItem.isHidden = true
         menu.addItem(pingResetMenuItem)
-
-        usageErrorMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        usageErrorMenuItem.isEnabled = false
-        usageErrorMenuItem.isHidden = true
-        menu.addItem(usageErrorMenuItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -231,20 +225,6 @@ class StatusBarController {
             .compactMap { $0 }
             .sink { [weak self] pingUsage in
                 self?.updateUsageFromPing(pingUsage)
-            }
-            .store(in: &cancellables)
-
-        // Watch usage errors
-        usageService.$lastError
-            .receive(on: RunLoop.main)
-            .sink { [weak self] error in
-                guard let self = self else { return }
-                if let error = error {
-                    self.usageErrorMenuItem.title = "\u{26A0} \(error)"
-                    self.usageErrorMenuItem.isHidden = false
-                } else {
-                    self.usageErrorMenuItem.isHidden = true
-                }
             }
             .store(in: &cancellables)
 
@@ -435,10 +415,8 @@ class StatusBarController {
             } else {
                 self.logStore.log("Manual ping failed via \(methodTag): \(result.errorMessage ?? "unknown")")
             }
-            // Refresh usage data unless rate-limited (don't bypass backoff)
-            if !self.usageService.isBackingOff {
-                self.usageService.fetchUsage()
-            }
+            // Usage data already provided by ping's message_limit SSE event
+            // (handled by updateUsageFromPing via Combine observer)
         }
     }
 
