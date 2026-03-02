@@ -104,6 +104,9 @@ class UsageService: ObservableObject {
     private var isUpdatingSessionKey = false
     private var consecutiveErrors: Int = 0
 
+    /// True when usage API is in backoff due to 429 rate limiting
+    var isBackingOff: Bool { consecutiveErrors > 0 }
+
     private let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

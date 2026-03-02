@@ -435,8 +435,10 @@ class StatusBarController {
             } else {
                 self.logStore.log("Manual ping failed via \(methodTag): \(result.errorMessage ?? "unknown")")
             }
-            // Also refresh full usage data (breakdowns)
-            self.usageService.fetchUsage()
+            // Refresh usage data unless rate-limited (don't bypass backoff)
+            if !self.usageService.isBackingOff {
+                self.usageService.fetchUsage()
+            }
         }
     }
 
