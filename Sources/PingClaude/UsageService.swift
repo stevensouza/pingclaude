@@ -5,6 +5,17 @@ import AppKit
 struct UsageWindow: Codable {
     let utilization: Double
     let resets_at: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case utilization
+        case resets_at
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.utilization = try container.decodeIfPresent(Double.self, forKey: .utilization) ?? 0.0
+        self.resets_at = try container.decodeIfPresent(String.self, forKey: .resets_at)
+    }
 }
 
 struct UsageResponse: Codable {
@@ -274,6 +285,10 @@ class UsageService: ObservableObject {
                     self.isUpdatingSessionKey = false
                 }
 
+                // Log raw response for schema debugging (truncated to 500 chars)
+                let rawPreview = String(data: data, encoding: .utf8).map { String($0.prefix(500)) } ?? "<non-UTF8>"
+                NSLog("PingClaude: Usage API raw (first 500): %@", rawPreview)
+
                 do {
                     let decoded = try JSONDecoder().decode(UsageResponse.self, from: data)
 
@@ -307,14 +322,29 @@ class UsageService: ObservableObject {
                     self.latestUsage = usage
                     self.consecutiveErrors = 0
 
-                    // Log key usage values
+                    // Log key usage values with breakdown details
                     var logParts = ["Usage API OK: session=\(Int(usage.sessionUtilization))%"]
                     if let weekly = usage.weeklyUtilization { logParts.append("weekly=\(Int(weekly))%") }
                     if let resetStr = usage.sessionResetsInString { logParts.append("resets=\(resetStr)") }
+                    for bd in breakdowns {
+                        var bdStr = "\(bd.label)=\(Int(bd.utilization))%"
+                        if let r = bd.resetsAt {
+                            let rem = r.timeIntervalSinceNow
+                            if rem > 0 {
+                                let h = Int(rem) / 3600; let m = (Int(rem) % 3600) / 60
+                                bdStr += h > 0 ? " resets=\(h)h\(m)m" : " resets=\(m)m"
+                            }
+                        }
+                        logParts.append(bdStr)
+                    }
                     self.logStore?.log(logParts.joined(separator: ", "))
                 } catch {
                     self.consecutiveErrors += 1
+                    let rawJSON = String(data: data, encoding: .utf8) ?? "<non-UTF8 data>"
                     NSLog("PingClaude: Usage API parse error: %@", error.localizedDescription)
+                    NSLog("PingClaude: Usage API raw response: %@", rawJSON)
+                    self.logStore?.log("Usage API parse error: \(error.localizedDescription)")
+                    self.logStore?.log("Usage API raw response: \(rawJSON)")
                 }
             }
         }.resume()
