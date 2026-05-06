@@ -8,6 +8,19 @@ Claude Code has a rolling 5-hour token usage window. If you start coding at 10 A
 
 PingClaude automates this strategy — it runs in your menu bar, pings Claude on a schedule, and shows your real-time session utilization percentage and exact reset time.
 
+## Lightweight CLI (cross-platform)
+
+Need the same "start the 5-hour clock" behavior on Linux, in cron, or without
+the macOS GUI? See [`cli/`](cli/) — a single-file Python 3 script that
+performs one ping and prints the result (success/failure, percent used, reset
+time). Works on macOS, Linux, and Windows; auto-detects the GUI app's
+credentials on Macs.
+
+Requires `curl_cffi` (one pip install) — claude.ai is fronted by Cloudflare,
+which TLS-fingerprints connections; `curl_cffi` impersonates Safari's TLS
+handshake so the script gets through. Full docs and setup:
+[`cli/README.md`](cli/README.md).
+
 ## Screenshots
 
 | Menu Bar | Claude Info | Ping History |
