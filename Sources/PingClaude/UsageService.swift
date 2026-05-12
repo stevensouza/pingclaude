@@ -341,9 +341,26 @@ class UsageService: ObservableObject {
                 } catch {
                     self.consecutiveErrors += 1
                     let rawJSON = String(data: data, encoding: .utf8) ?? "<non-UTF8 data>"
-                    NSLog("PingClaude: Usage API parse error: %@", error.localizedDescription)
+                    let detail: String
+                    if let dec = error as? DecodingError {
+                        switch dec {
+                        case .keyNotFound(let key, let ctx):
+                            detail = "keyNotFound '\(key.stringValue)' at [\(ctx.codingPath.map { $0.stringValue }.joined(separator: "."))]"
+                        case .valueNotFound(let type, let ctx):
+                            detail = "valueNotFound \(type) at [\(ctx.codingPath.map { $0.stringValue }.joined(separator: "."))]"
+                        case .typeMismatch(let type, let ctx):
+                            detail = "typeMismatch \(type) at [\(ctx.codingPath.map { $0.stringValue }.joined(separator: "."))]"
+                        case .dataCorrupted(let ctx):
+                            detail = "dataCorrupted at [\(ctx.codingPath.map { $0.stringValue }.joined(separator: "."))]: \(ctx.debugDescription)"
+                        @unknown default:
+                            detail = error.localizedDescription
+                        }
+                    } else {
+                        detail = error.localizedDescription
+                    }
+                    NSLog("PingClaude: Usage API parse error: %@", detail)
                     NSLog("PingClaude: Usage API raw response: %@", rawJSON)
-                    self.logStore?.log("Usage API parse error: \(error.localizedDescription)")
+                    self.logStore?.log("Usage API parse error: \(detail)")
                     self.logStore?.log("Usage API raw response: \(rawJSON)")
                 }
             }
