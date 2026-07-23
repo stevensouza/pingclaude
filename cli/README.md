@@ -162,7 +162,15 @@ pingclaude.py ping --json           # ping, single JSON line
 pingclaude.py ping --quiet          # silent on success, error to stderr on failure
 pingclaude.py ping --no-usage       # skip usage parsing, just verify the ping
 pingclaude.py ping --config PATH    # explicit config file path
+
+pingclaude.py schedule              # always-on loop; pings at the times in your config
+pingclaude.py schedule --json       # print a JSON record on each fire
+pingclaude.py schedule --history PATH  # also append each fire's JSON record to a file
 ```
+
+The `ping` command is single-shot. The `schedule` command is a long-running
+loop that fires `ping` at the wall-clock times you put in the config file — see
+**[Scheduling via JSON config](#scheduling-via-json-config-recommended)** below.
 
 Default human output:
 
@@ -214,6 +222,123 @@ jq -r '[.ts, (.windows."5h".util // 0)] | @tsv' ~/.pingclaude/history.jsonl
 ```cmd
 schtasks /create /sc daily /tn PingClaude /st 08:55 ^
   /tr "python C:\path\to\cli\pingclaude.py ping --quiet"
+```
+
+## Scheduling via JSON config (recommended)
+
+The cron/Task-Scheduler routes above work, but they put the *when* in a
+crontab. If you'd rather control the schedule by editing **one JSON file** — the
+same one that holds your credentials — use the built-in `schedule` command.
+
+`pingclaude.py schedule` is a small, always-on loop that pings at the local
+wall-clock times listed in your config, **7 days a week by default**. It:
+
+- re-reads the config **every cycle**, so edits take effect within ~60s with no
+  restart (add a time, change the timezone, flip it off);
+- fires each slot **exactly once per day** (safe across sleep/resume and clock
+  changes);
+- reuses the same ping path as `ping`, so every ping uses **Haiku**
+  (`claude-haiku-4-5-20251001`);
+- logs each fire to stdout (captured by systemd/launchd) and, with `--history`,
+  appends the same one-line JSON record used by `ping --json`.
+
+### Why an always-on host (and not a sleeping laptop)
+
+Because `schedule` is a process that's **already running** at 06:00, it needs
+**no cron, no `pmset`, and no wake-from-sleep magic** — it just notices the slot
+is due. That's why the ideal host is an always-on machine (a **Linux Mint /
+Linux box**, a Mac mini, or any Mac you keep awake). A **clamshell / lid-closed
+laptop deep-sleeps and will not fire on time**, so it's a poor host for
+unattended early-morning pings.
+
+### The `schedule` config block
+
+Add a `schedule` object to `~/.config/pingclaude/config.json` (alongside
+`session_key` / `org_id`):
+
+```json
+{
+  "session_key": "sk-ant-sid01-...",
+  "org_id": "00000000-0000-0000-0000-000000000000",
+  "schedule": {
+    "enabled": true,
+    "times": ["06:00", "11:00"],
+    "weekdays": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+    "timezone": "America/New_York",
+    "catch_up": false
+  }
+}
+```
+
+| Key        | Meaning                                                                 |
+|------------|-------------------------------------------------------------------------|
+| `enabled`  | Master on/off. When `false`, the loop idles but keeps running (flip it back on with a live edit — no restart). |
+| `times`    | Local `HH:MM` (24-hour) fire times. Empty ⇒ nothing fires.              |
+| `weekdays` | 3-letter day names. **Omit or leave empty to run all 7 days.**           |
+| `timezone` | IANA name (e.g. `America/New_York`). Omit ⇒ the host's local zone.       |
+| `catch_up` | If `true`, on startup fire once for a slot earlier *today* that hasn't fired yet. Default `false`. |
+
+> **Python version:** `schedule` prefers **Python 3.9+** (for `zoneinfo`, so the
+> `timezone` field is DST-correct). On 3.8 it falls back to the host's local
+> time and ignores `timezone` (with a warning). `ping` remains 3.8-compatible.
+> Any current Linux Mint / macOS ships 3.9+, so this is a non-issue in practice.
+
+### Linux Mint / Linux setup (recommended host)
+
+End-to-end, on your always-on box:
+
+```bash
+# 1. venv with curl_cffi
+python3 -m venv ~/.pingclaude/venv
+~/.pingclaude/venv/bin/pip install curl_cffi
+
+# 2. config with creds + schedule (see block above), locked down
+mkdir -p ~/.config/pingclaude
+cp cli/config.example.json ~/.config/pingclaude/config.json
+chmod 600 ~/.config/pingclaude/config.json
+$EDITOR ~/.config/pingclaude/config.json      # paste real session_key/org_id, set times
+
+# 3. verify one ping works
+~/.pingclaude/venv/bin/python3 /path/to/pingclaude/cli/pingclaude.py ping
+
+# 4. install the systemd USER service (edit the two paths inside it first)
+mkdir -p ~/.config/systemd/user
+cp cli/service/pingclaude.service ~/.config/systemd/user/pingclaude.service
+$EDITOR ~/.config/systemd/user/pingclaude.service   # set venv + checkout paths
+loginctl enable-linger "$USER"                # run without an interactive login
+systemctl --user daemon-reload
+systemctl --user enable --now pingclaude.service
+
+# 5. watch it
+systemctl --user status pingclaude.service
+journalctl --user -u pingclaude.service -f
+```
+
+`loginctl enable-linger` is what keeps the user service alive when you're not
+logged in — essential for a headless always-on box.
+
+### macOS setup
+
+Best on a Mac you keep awake (see the wake caveat above). A sample LaunchAgent
+lives at `cli/service/com.pingclaude.schedule.plist`:
+
+```bash
+$EDITOR cli/service/com.pingclaude.schedule.plist       # set the /Users/you paths
+cp cli/service/com.pingclaude.schedule.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.pingclaude.schedule.plist
+launchctl list | grep pingclaude
+tail -f ~/.pingclaude/scheduler.out.log
+```
+
+On macOS the scheduler can also read credentials straight from the GUI app's
+plist, so you may only need the `schedule` block in the JSON config.
+
+### Watching the log
+
+```bash
+journalctl --user -u pingclaude -f            # Linux (systemd)
+tail -f ~/.pingclaude/scheduler.out.log       # macOS (launchd)
+tail -f ~/.pingclaude/history.jsonl           # the per-fire JSON records (--history)
 ```
 
 ## Exit codes
@@ -280,17 +405,21 @@ your real IP.
 
 ## Files
 
-| File                              | Purpose                          |
-|-----------------------------------|----------------------------------|
-| `pingclaude.py`                   | the script                       |
-| `config.example.json`             | sample config (no real creds)    |
-| `~/.config/pingclaude/config.json`| your config (you create this)    |
-| `~/.pingclaude/venv/`             | suggested venv with `curl_cffi`  |
-| `~/.pingclaude/history.jsonl`     | suggested location for cron logs |
+| File                                        | Purpose                                   |
+|---------------------------------------------|-------------------------------------------|
+| `pingclaude.py`                             | the script (`ping` + `schedule`)          |
+| `config.example.json`                       | sample config, incl. the `schedule` block |
+| `service/pingclaude.service`                | sample systemd user service (Linux)       |
+| `service/com.pingclaude.schedule.plist`     | sample launchd agent (macOS)              |
+| `~/.config/pingclaude/config.json`          | your config (you create this)             |
+| `~/.pingclaude/venv/`                       | suggested venv with `curl_cffi`           |
+| `~/.pingclaude/history.jsonl`               | suggested location for history records    |
 
 ## Limits / scope
 
-- Single-shot. No daemon, no schedule of its own — that's what cron is for.
+- `ping` is single-shot — no schedule of its own; drive it from cron/Task
+  Scheduler, or use the built-in **`schedule`** command for a JSON-config-driven,
+  always-on scheduler (see [Scheduling via JSON config](#scheduling-via-json-config-recommended)).
 - Burn-rate, plan tier, weekly per-model breakdowns: not collected. The GUI
   app does those. The CLI's job is to start the clock and tell you where it
   stands.
