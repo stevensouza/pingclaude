@@ -1,0 +1,31 @@
+# PingClaude scheduler — systemd USER service (Linux, e.g. Linux Mint).
+#
+# Runs the always-on scheduler that pings claude.ai at the wall-clock times in
+# your ~/.config/pingclaude/config.json "schedule" block. Because this process
+# runs continuously on an always-on machine, it needs NO cron and NO wake-from-
+# sleep support — it is already alive at 06:00 and notices the slot is due.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   # edit the two paths below to match your checkout + venv, then:
+#   cp cli/service/pingclaude.service ~/.config/systemd/user/pingclaude.service
+#   loginctl enable-linger "$USER"          # keep it running with no login session
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now pingclaude.service
+#   systemctl --user status pingclaude.service
+#   journalctl --user -u pingclaude.service -f   # watch it fire
+
+[Unit]
+Description=PingClaude scheduler (starts the claude.ai 5-hour window on a JSON schedule)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# EDIT these two paths: the venv python that has curl_cffi, and the repo checkout.
+ExecStart=%h/.pingclaude/venv/bin/python3 %h/pingclaude/cli/pingclaude.py schedule --json --history %h/.pingclaude/history.jsonl
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

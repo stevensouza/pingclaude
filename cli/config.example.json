@@ -1,4 +1,11 @@
 {
   "session_key": "sk-ant-sid01-PUT-YOUR-CLAUDE-AI-SESSION-COOKIE-HERE",
-  "org_id": "00000000-0000-0000-0000-000000000000"
+  "org_id": "00000000-0000-0000-0000-000000000000",
+  "schedule": {
+    "enabled": true,
+    "times": ["06:00", "11:00"],
+    "weekdays": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+    "timezone": "America/New_York",
+    "catch_up": false
+  }
 }

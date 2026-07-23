@@ -25,7 +25,7 @@ import plistlib
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 try:
     from curl_cffi import requests as cffi_requests
@@ -486,9 +486,9 @@ def print_human(ok: bool, duration_s: float, reply: str,
         print(f"  {labels[key]}: {pct}{when}")
 
 
-def print_json(ok: bool, duration_s: float, reply: str,
-               usage: dict | None, error: str | None,
-               source: str) -> None:
+def _build_result_record(ok: bool, duration_s: float, reply: str,
+                         usage: dict | None, error: str | None,
+                         source: str) -> dict:
     out = {
         "ts": datetime.now().astimezone().isoformat(timespec="seconds"),
         "ok": ok,
@@ -502,7 +502,79 @@ def print_json(ok: bool, duration_s: float, reply: str,
             out["windows"] = usage
     else:
         out["error"] = error or "unknown"
-    print(json.dumps(out, separators=(",", ":")))
+    return out
+
+
+def print_json(ok: bool, duration_s: float, reply: str,
+               usage: dict | None, error: str | None,
+               source: str) -> None:
+    record = _build_result_record(ok, duration_s, reply, usage, error, source)
+    print(json.dumps(record, separators=(",", ":")))
+
+
+# ---- ping execution (shared by `ping` and `schedule`) ----------------------
+
+
+class PingOutcome:
+    """Result of one ping attempt. Carries data only — never prints."""
+
+    __slots__ = ("ok", "duration_s", "reply", "usage", "error",
+                 "exit_code", "source", "unexpected")
+
+    def __init__(self, ok: bool, duration_s: float, reply: str,
+                 usage: dict | None, error: str | None,
+                 exit_code: int, source: str, unexpected: bool = False):
+        self.ok = ok
+        self.duration_s = duration_s
+        self.reply = reply
+        self.usage = usage
+        self.error = error
+        self.exit_code = exit_code
+        self.source = source
+        self.unexpected = unexpected
+
+
+def execute_ping(config: Config, parse_usage: bool) -> PingOutcome:
+    """Run one ping end-to-end and return a PingOutcome. Pure: no printing.
+
+    Shared by `cmd_ping` (one-shot CLI) and `cmd_schedule` (the scheduler),
+    so there is a single network/ping code path. Callers must ensure
+    curl_cffi is available (cffi_requests is not None) before calling.
+    """
+    cookie = f"sessionKey={config.session_key}"
+    conv_uuid = uuid.uuid4().hex
+    # claude.ai conversation UUIDs are typically formatted; the GUI uses lowercase
+    # standard form. Either works, but match the Swift impl.
+    conv_uuid = str(uuid.UUID(conv_uuid)).lower()
+
+    started = time.monotonic()
+    session = _make_session()
+    try:
+        new_key = create_conversation(session, config.org_id, cookie, conv_uuid)
+        if new_key:
+            cookie = f"sessionKey={new_key}"
+        reply, usage, refreshed_key = send_message_streaming(
+            session, config.org_id, cookie, conv_uuid,
+            parse_usage=parse_usage,
+        )
+        delete_conversation(session, config.org_id, cookie, conv_uuid)
+        duration = time.monotonic() - started
+
+        latest_key = refreshed_key or new_key
+        if latest_key:
+            save_session_key(config, latest_key)
+
+        return PingOutcome(True, duration, reply, usage, None,
+                           EXIT_OK, config.source)
+    except APIError as e:
+        duration = time.monotonic() - started
+        return PingOutcome(False, duration, "", None, str(e),
+                           e.exit_code, config.source)
+    except Exception as e:  # pragma: no cover — last-ditch safety net
+        duration = time.monotonic() - started
+        msg = f"unexpected error: {e.__class__.__name__}: {e}"
+        return PingOutcome(False, duration, "", None, msg,
+                           EXIT_PARSE, config.source, unexpected=True)
 
 
 # ---- top level -------------------------------------------------------------
@@ -544,56 +616,317 @@ def cmd_ping(args: argparse.Namespace) -> int:
             print(f"pingclaude: {msg.splitlines()[0]}", file=sys.stderr)
         return EXIT_CONFIG
 
-    cookie = f"sessionKey={config.session_key}"
-    conv_uuid = uuid.uuid4().hex
-    # claude.ai conversation UUIDs are typically formatted; the GUI uses lowercase
-    # standard form. Either works, but match the Swift impl.
-    conv_uuid = str(uuid.UUID(conv_uuid)).lower()
+    outcome = execute_ping(config, parse_usage=not args.no_usage)
 
-    started = time.monotonic()
-    session = _make_session()
-    try:
-        new_key = create_conversation(session, config.org_id, cookie, conv_uuid)
-        if new_key:
-            cookie = f"sessionKey={new_key}"
-        reply, usage, refreshed_key = send_message_streaming(
-            session, config.org_id, cookie, conv_uuid,
-            parse_usage=not args.no_usage,
-        )
-        delete_conversation(session, config.org_id, cookie, conv_uuid)
-        duration = time.monotonic() - started
-
-        latest_key = refreshed_key or new_key
-        if latest_key:
-            save_session_key(config, latest_key)
-
+    if outcome.ok:
         if args.json:
-            print_json(True, duration, reply, usage, None,
-                       source=config.source)
+            print_json(True, outcome.duration_s, outcome.reply, outcome.usage,
+                       None, source=outcome.source)
         elif not args.quiet:
-            print_human(True, duration, reply, usage, None,
-                        source=config.source)
+            print_human(True, outcome.duration_s, outcome.reply, outcome.usage,
+                        None, source=outcome.source)
         return EXIT_OK
 
-    except APIError as e:
-        duration = time.monotonic() - started
-        if args.json:
-            print_json(False, duration, "", None, str(e),
-                       source=config.source)
-        elif args.quiet:
-            print(f"pingclaude: {e}", file=sys.stderr)
-        else:
-            print_human(False, duration, "", None, str(e),
-                        source=config.source)
-        return e.exit_code
-    except Exception as e:  # pragma: no cover — last-ditch safety net
-        duration = time.monotonic() - started
-        msg = f"unexpected error: {e.__class__.__name__}: {e}"
-        if args.json:
-            print_json(False, duration, "", None, msg, source=config.source)
-        else:
-            print(f"✗ {msg}", file=sys.stderr)
-        return EXIT_PARSE
+    if args.json:
+        print_json(False, outcome.duration_s, "", None, outcome.error,
+                   source=outcome.source)
+    elif outcome.unexpected:
+        print(f"✗ {outcome.error}", file=sys.stderr)
+    elif args.quiet:
+        print(f"pingclaude: {outcome.error}", file=sys.stderr)
+    else:
+        print_human(False, outcome.duration_s, "", None, outcome.error,
+                    source=outcome.source)
+    return outcome.exit_code
+
+
+# ---- scheduler (JSON-config-driven, always-on) -----------------------------
+
+WEEKDAY_NAMES = {
+    "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
+}
+
+
+class ScheduleSettings:
+    __slots__ = ("enabled", "times", "weekdays", "timezone", "catch_up", "path")
+
+    def __init__(self, enabled: bool, times: list, weekdays: set,
+                 timezone: str, catch_up: bool, path: str | None):
+        self.enabled = enabled
+        self.times = times          # list of (hour, minute)
+        self.weekdays = weekdays    # set of ints 0-6 (Mon=0), matches datetime.weekday()
+        self.timezone = timezone    # IANA name string
+        self.catch_up = catch_up
+        self.path = path
+
+
+def _log(msg: str) -> None:
+    """Timestamped line to stdout (captured by journald / launchd). Flushed."""
+    ts = datetime.now().astimezone().isoformat(timespec="seconds")
+    print(f"{ts} {msg}", flush=True)
+
+
+def _parse_hhmm(value) -> tuple | None:
+    if not isinstance(value, str):
+        return None
+    parts = value.strip().split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        h, m = int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+    if 0 <= h <= 23 and 0 <= m <= 59:
+        return (h, m)
+    return None
+
+
+def load_schedule(explicit_path: str | None = None
+                  ) -> tuple[ScheduleSettings, list[str]]:
+    """Read the 'schedule' block from the JSON config. Lenient — returns safe
+    defaults (disabled) on any problem and never raises, since this is re-read
+    on every loop iteration and a half-saved edit must not kill the daemon."""
+    attempted: list[str] = []
+    default_tz = _local_iana_tz()
+    disabled = ScheduleSettings(False, [], set(range(7)), default_tz, False, None)
+
+    paths = [explicit_path] if explicit_path else CONFIG_PATHS
+    data = None
+    used_path = None
+    for path in paths:
+        if not path:
+            continue
+        attempted.append(path)
+        if os.path.isfile(path):
+            try:
+                with open(path, "r") as f:
+                    data = json.load(f)
+                used_path = path
+                break
+            except (OSError, ValueError) as e:
+                _log(f"warning: could not read {path}: {e}")
+
+    if not isinstance(data, dict):
+        return disabled, attempted
+
+    block = data.get("schedule")
+    if not isinstance(block, dict):
+        return ScheduleSettings(False, [], set(range(7)), default_tz, False,
+                                used_path), attempted
+
+    enabled = bool(block.get("enabled", True))
+    catch_up = bool(block.get("catch_up", False))
+
+    times: list = []
+    raw_times = block.get("times")
+    if isinstance(raw_times, list):
+        for entry in raw_times:
+            hm = _parse_hhmm(entry)
+            if hm is None:
+                _log(f"warning: ignoring invalid schedule time {entry!r}")
+            else:
+                times.append(hm)
+
+    raw_days = block.get("weekdays")
+    if not raw_days:
+        weekdays = set(range(7))            # default: all 7 days
+    elif isinstance(raw_days, list):
+        weekdays = set()
+        for d in raw_days:
+            idx = WEEKDAY_NAMES.get(str(d).strip().lower()[:3])
+            if idx is None:
+                _log(f"warning: ignoring invalid weekday {d!r}")
+            else:
+                weekdays.add(idx)
+        if not weekdays:
+            weekdays = set(range(7))
+    else:
+        weekdays = set(range(7))
+
+    tz = block.get("timezone")
+    if not isinstance(tz, str) or not tz.strip():
+        tz = default_tz
+
+    return ScheduleSettings(enabled, times, weekdays, tz.strip(), catch_up,
+                            used_path), attempted
+
+
+def _get_zoneinfo_class():
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo
+    except ImportError:
+        pass
+    try:
+        from backports.zoneinfo import ZoneInfo  # type: ignore
+        return ZoneInfo
+    except ImportError:
+        return None
+
+
+def _load_zoneinfo(tz_name: str):
+    """Resolve tz_name to a tzinfo. Prefer stdlib zoneinfo (3.9+), then the
+    backport, then fall back to the fixed system-local offset with a warning."""
+    zi = _get_zoneinfo_class()
+    if zi is None:
+        _log(f"warning: zoneinfo unavailable (Python < 3.9); ignoring configured "
+             f"timezone {tz_name!r} and using system-local time")
+        return datetime.now().astimezone().tzinfo
+    try:
+        return zi(tz_name)
+    except Exception as e:
+        _log(f"warning: could not load timezone {tz_name!r} ({e}); "
+             f"using system-local time")
+        return datetime.now().astimezone().tzinfo
+
+
+def _slot_key(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d@%H:%M")
+
+
+def _prune_fired(fired: set, now: datetime) -> None:
+    """Drop fired keys older than yesterday (keep today + yesterday)."""
+    cutoff = (now.date() - timedelta(days=1)).isoformat()
+    stale = {k for k in fired if k.split("@", 1)[0] < cutoff}
+    fired -= stale
+
+
+def _due_slots_today(now: datetime, settings: ScheduleSettings, tz) -> list:
+    """Allowed slot datetimes for now's local date whose time is <= now."""
+    d = now.date()
+    out: list = []
+    if d.weekday() in settings.weekdays:
+        for (h, m) in settings.times:
+            cand = datetime(d.year, d.month, d.day, h, m, tzinfo=tz)
+            if cand <= now:
+                out.append(cand)
+    return out
+
+
+def _next_fire(now: datetime, settings: ScheduleSettings, tz) -> datetime | None:
+    """Earliest scheduled datetime strictly after now, or None."""
+    if not settings.enabled or not settings.times:
+        return None
+    best = None
+    base = now.date()
+    for offset in range(0, 9):
+        d = base + timedelta(days=offset)
+        if d.weekday() not in settings.weekdays:
+            continue
+        for (h, m) in settings.times:
+            cand = datetime(d.year, d.month, d.day, h, m, tzinfo=tz)
+            if cand > now and (best is None or cand < best):
+                best = cand
+    return best
+
+
+def _append_history(path: str, line: str) -> None:
+    try:
+        p = os.path.expanduser(path)
+        with open(p, "a") as f:
+            f.write(line + "\n")
+    except OSError as e:
+        _log(f"warning: could not append history to {path}: {e}")
+
+
+def _fire(slot: datetime, args: argparse.Namespace, fired: set) -> None:
+    """Send one ping for a due slot. Never raises — a failure logs and the
+    loop continues. Always marks the slot fired so it won't repeat today."""
+    key = _slot_key(slot)
+    if cffi_requests is None:
+        _log(f"skip {key}: curl_cffi not installed — see cli/README.md")
+        fired.add(key)
+        return
+
+    config, _attempted = load_config(args.config)
+    if config is None:
+        _log(f"skip {key}: no claude.ai credentials found")
+        fired.add(key)
+        return
+
+    try:
+        outcome = execute_ping(config, parse_usage=not args.no_usage)
+    except Exception as e:  # pragma: no cover — execute_ping is already guarded
+        _log(f"fire {key} crashed: {e.__class__.__name__}: {e}")
+        fired.add(key)
+        return
+
+    record = json.dumps(
+        _build_result_record(outcome.ok, outcome.duration_s, outcome.reply,
+                             outcome.usage, outcome.error, outcome.source),
+        separators=(",", ":"))
+    if args.json:
+        print(record, flush=True)
+    if getattr(args, "history", None):
+        _append_history(args.history, record)
+
+    status = "ok" if outcome.ok else f"FAILED: {outcome.error}"
+    _log(f"fired {key} -> {status}")
+    fired.add(key)
+
+
+def cmd_schedule(args: argparse.Namespace) -> int:
+    _log(f"pingclaude scheduler starting (model {MODEL})")
+    if cffi_requests is None:
+        _log("warning: curl_cffi is not installed — pings will be skipped until "
+             "it is available. See cli/README.md for install instructions.")
+
+    fired: set = set()
+    startup = True  # stays True until the first iteration while enabled+active
+    last_next_key = None  # so we log "next fire" only when it changes
+    try:
+        while True:
+            settings, _attempted = load_schedule(args.config)
+            tz = _load_zoneinfo(settings.timezone)
+            now = datetime.now(tz)
+            _prune_fired(fired, now)
+
+            if not settings.enabled or not settings.times:
+                reason = "disabled" if not settings.enabled else "no times set"
+                _log(f"scheduler idle ({reason}); re-checking config in 60s")
+                time.sleep(60)
+                continue
+
+            due_unfired = [s for s in _due_slots_today(now, settings, tz)
+                           if _slot_key(s) not in fired]
+
+            if startup:
+                if settings.catch_up and due_unfired:
+                    latest = max(due_unfired)
+                    _log(f"startup catch-up: firing most recent missed slot "
+                         f"{_slot_key(latest)}")
+                    for s in due_unfired:
+                        if s is not latest:
+                            fired.add(_slot_key(s))
+                    _fire(latest, args, fired)
+                elif due_unfired:
+                    for s in due_unfired:
+                        fired.add(_slot_key(s))
+                    _log(f"startup: {len(due_unfired)} earlier slot(s) today "
+                         f"already passed; skipping (catch_up is off)")
+                startup = False
+            elif due_unfired:
+                latest = max(due_unfired)
+                for s in due_unfired:
+                    if s is not latest:
+                        fired.add(_slot_key(s))
+                _fire(latest, args, fired)
+
+            nxt = _next_fire(now, settings, tz)
+            if nxt is not None:
+                nxt_key = _slot_key(nxt)
+                if nxt_key != last_next_key:
+                    _log(f"next fire scheduled for {nxt_key}")
+                    last_next_key = nxt_key
+                delay = (nxt - now).total_seconds()
+            else:
+                delay = 60.0
+            # Cap at 60s so we stay resilient to suspend/resume, clock jumps,
+            # and DST shifts; re-reads config and re-checks slots each wake.
+            time.sleep(max(1.0, min(delay, 60.0)))
+    except KeyboardInterrupt:
+        _log("scheduler stopping (interrupt)")
+        return EXIT_OK
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -605,11 +938,15 @@ def build_parser() -> argparse.ArgumentParser:
             "account, NOT the developer API) and prints the result."
         ),
         epilog=(
-            "credentials (priority high → low):\n"
+            "commands:\n"
+            "  ping      send one ping and exit (for cron / ad-hoc use)\n"
+            "  schedule  always-on loop that pings at the times in your config's\n"
+            "            \"schedule\" block (run under systemd / launchd)\n"
+            "\ncredentials (priority high → low):\n"
             f"  1. env vars  {ENV_SESSION_KEY}, {ENV_ORG_ID}\n"
             "  2. config    ~/.config/pingclaude/config.json (chmod 600)\n"
             "  3. macOS     ~/Library/Preferences/com.pingclaude.app.plist\n"
-            "\nSee cli/README.md for setup, cron examples, and exit codes."
+            "\nSee cli/README.md for setup, scheduling, and exit codes."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -628,6 +965,38 @@ def build_parser() -> argparse.ArgumentParser:
     p_ping.add_argument("--config", metavar="PATH",
                         help="explicit config file path")
     p_ping.set_defaults(func=cmd_ping)
+
+    p_sched = sub.add_parser(
+        "schedule",
+        help="run the always-on scheduler driven by the JSON config",
+        description=(
+            "Long-running loop that pings at the local wall-clock times listed "
+            "in your config file's \"schedule\" block (7 days a week by "
+            "default). Re-reads the config each cycle, so edits take effect "
+            "within ~60s with no restart. Intended to run as a systemd or "
+            f"launchd service on an always-on machine. Every ping uses {MODEL}."
+        ),
+        epilog=(
+            "example \"schedule\" block in ~/.config/pingclaude/config.json:\n"
+            '  "schedule": {\n'
+            '    "enabled": true,\n'
+            '    "times": ["06:00", "11:00"],\n'
+            '    "weekdays": ["mon","tue","wed","thu","fri","sat","sun"],\n'
+            '    "timezone": "America/New_York"\n'
+            "  }\n"
+            "\nSee cli/README.md → \"Scheduling via JSON config\"."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_sched.add_argument("--json", action="store_true",
+                         help="print a JSON record to stdout on each fire")
+    p_sched.add_argument("--no-usage", action="store_true",
+                         help="skip parsing usage windows on each fire")
+    p_sched.add_argument("--config", metavar="PATH",
+                         help="explicit config file path")
+    p_sched.add_argument("--history", metavar="PATH",
+                         help="also append each fire's JSON record to this file")
+    p_sched.set_defaults(func=cmd_schedule)
     return parser
 
 

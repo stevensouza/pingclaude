@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PingClaude scheduler — launchd LaunchAgent (macOS).
+     Runs the always-on scheduler that pings claude.ai at the times in your
+     ~/.config/pingclaude/config.json "schedule" block. Best used on a Mac that
+     stays awake; on a clamshell/lid-closed laptop the machine sleeps and this
+     will not fire on time — prefer an always-on host (see cli/service/pingclaude.service).
+
+     Install (edit the /Users/you paths first):
+       cp cli/service/com.pingclaude.schedule.plist ~/Library/LaunchAgents/
+       launchctl load ~/Library/LaunchAgents/com.pingclaude.schedule.plist
+       launchctl list | grep pingclaude
+       tail -f ~/.pingclaude/scheduler.out.log
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.pingclaude.schedule</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/you/.pingclaude/venv/bin/python3</string>
+        <string>/Users/you/pingclaude/cli/pingclaude.py</string>
+        <string>schedule</string>
+        <string>--json</string>
+        <string>--history</string>
+        <string>/Users/you/.pingclaude/history.jsonl</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/you/.pingclaude/scheduler.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/you/.pingclaude/scheduler.err.log</string>
+</dict>
+</plist>
