@@ -189,13 +189,27 @@ struct SettingsView: View {
                                     .toggleStyle(.checkbox)
                                     .font(.system(size: 10))
                                     .padding(.leading, 76)
-                                Text("| Auto-refreshes on each API call.")
+                                Text("| Auto-refreshes on each API call. Invalid refreshes are ignored.")
                                     .font(.system(size: 10))
                                     .foregroundColor(.secondary)
                             }
                         }
 
-                        if settings.hasUsageAPIConfig {
+                        if settings.authFailed {
+                            Text("\u{26A0} Session key rejected \u{2014} paste a fresh key from claude.ai")
+                                .font(.system(size: 11))
+                                .foregroundColor(.red)
+                            if settings.canRestoreSessionKey {
+                                Button("Restore last known-good key") {
+                                    settings.restoreLastGoodSessionKey()
+                                }
+                                .font(.system(size: 11))
+                            }
+                        } else if !settings.claudeSessionKey.isEmpty && !settings.hasUsageAPIConfig {
+                            Text("\u{26A0} That doesn't look like a session key \u{2014} it should start with \"sk-ant-\"")
+                                .font(.system(size: 11))
+                                .foregroundColor(.orange)
+                        } else if settings.hasUsageAPIConfig {
                             Text("\u{2713} API ping + usage polling active")
                                 .font(.system(size: 11))
                                 .foregroundColor(.green)

@@ -56,18 +56,117 @@ class SettingsStore: ObservableObject {
     @Published var pingOnStartup: Bool {
         didSet { defaults.set(pingOnStartup, forKey: Constants.Keys.pingOnStartup) }
     }
+    /// Normalizes whatever it is handed, so a pasted `sessionKey=…`, stray quotes, or a trailing
+    /// newline can never reach the `Cookie` header. Validation of *server-supplied* values lives in
+    /// `applyRefreshedSessionKey` — rejecting invalid values here would make the field uneditable,
+    /// since SwiftUI writes this binding on every keystroke.
     @Published var claudeSessionKey: String {
-        didSet { defaults.set(claudeSessionKey, forKey: Constants.Keys.claudeSessionKey) }
+        didSet {
+            let sanitized = SessionKeyParser.sanitize(claudeSessionKey)
+            if sanitized != claudeSessionKey {
+                claudeSessionKey = sanitized
+                return
+            }
+            defaults.set(claudeSessionKey, forKey: Constants.Keys.claudeSessionKey)
+
+            // A different key deserves a fresh attempt — but not when we just rolled back to the
+            // backup, or clearing the flag here would let the same rollback repeat forever.
+            if claudeSessionKey != oldValue && !isRestoringBackup {
+                didRestoreBackup = false
+                authFailed = false
+            }
+        }
     }
+    /// The most recent session key that produced an authenticated 200, kept so a bad refresh
+    /// can be rolled back instead of locking the user out.
+    @Published var lastKnownGoodSessionKey: String {
+        didSet { defaults.set(lastKnownGoodSessionKey, forKey: Constants.Keys.claudeSessionKeyBackup) }
+    }
+    /// True once the credential has been rejected and the rollback below is exhausted — i.e. only
+    /// the user can fix it. Drives the menu bar auth-error state. Not persisted.
+    @Published private(set) var authFailed: Bool = false
+    /// Guards against restoring a backup that has itself already been rejected.
+    private var didRestoreBackup = false
+    /// True while `noteAuthFailed` is rolling back, so the didSet does not clear the guard above.
+    private var isRestoringBackup = false
+    /// Set by AppDelegate. Weak because LogStore holds this store.
+    weak var logStore: LogStore?
     @Published var claudeOrgId: String {
         didSet { defaults.set(claudeOrgId, forKey: Constants.Keys.claudeOrgId) }
     }
     @Published var usagePollingSeconds: Int {
         didSet { defaults.set(usagePollingSeconds, forKey: Constants.Keys.usagePollingSeconds) }
     }
-    /// Whether we have enough config for API-based pinging
+    /// Whether we have enough config for API-based pinging. Requires a key that actually looks
+    /// like a credential — a junk value must not send us into an endless 403 loop.
     var hasUsageAPIConfig: Bool {
-        !claudeSessionKey.isEmpty && !claudeOrgId.isEmpty
+        SessionKeyParser.isValid(claudeSessionKey) && !claudeOrgId.isEmpty
+    }
+
+    /// Whether a rollback is available for the user to trigger by hand.
+    var canRestoreSessionKey: Bool {
+        SessionKeyParser.isValid(lastKnownGoodSessionKey)
+            && lastKnownGoodSessionKey != claudeSessionKey
+    }
+
+    // MARK: - Session Key Lifecycle
+
+    /// The only path a network response may use to write the key. Ignores anything that does not
+    /// look like a credential, so a cleared cookie cannot overwrite a working one.
+    @discardableResult
+    func applyRefreshedSessionKey(_ candidate: String) -> Bool {
+        let key = SessionKeyParser.sanitize(candidate)
+        guard SessionKeyParser.isValid(key), key != claudeSessionKey else { return false }
+        claudeSessionKey = key
+        return true
+    }
+
+    /// Record that the current key authenticated successfully, and clear any auth-error state.
+    func noteAuthSucceeded() {
+        if SessionKeyParser.isValid(claudeSessionKey) && claudeSessionKey != lastKnownGoodSessionKey {
+            lastKnownGoodSessionKey = claudeSessionKey
+        }
+        didRestoreBackup = false
+        if authFailed {
+            authFailed = false
+            logStore?.log("Session key accepted again \u{2014} auth restored")
+        }
+    }
+
+    /// Handle a 401/403. Rolls back to the last known-good key once; if that is unavailable or has
+    /// already been tried, surfaces the failure to the user rather than retrying forever.
+    /// Returns true when a rollback happened and the caller should retry.
+    @discardableResult
+    func noteAuthFailed(source: String, statusCode: Int) -> Bool {
+        if !didRestoreBackup && canRestoreSessionKey {
+            didRestoreBackup = true
+            isRestoringBackup = true
+            claudeSessionKey = lastKnownGoodSessionKey
+            isRestoringBackup = false
+            logStore?.log("\(source) HTTP \(statusCode) \u{2014} restored last known-good session key")
+            return true
+        }
+
+        // The restored key failed too, so it is genuinely expired: stop offering it.
+        if didRestoreBackup && !lastKnownGoodSessionKey.isEmpty {
+            lastKnownGoodSessionKey = ""
+        }
+
+        if !authFailed {
+            authFailed = true
+            logStore?.log("\(source) auth error: HTTP \(statusCode) \u{2014} session key expired, update it in Settings")
+        }
+        return false
+    }
+
+    /// Manual rollback from the menu bar / Settings.
+    @discardableResult
+    func restoreLastGoodSessionKey() -> Bool {
+        guard canRestoreSessionKey else { return false }
+        claudeSessionKey = lastKnownGoodSessionKey
+        didRestoreBackup = false
+        authFailed = false
+        return true
     }
 
     init() {
@@ -90,6 +189,7 @@ class SettingsStore: ObservableObject {
             Constants.Keys.pingOnWake: Constants.Defaults.pingOnWake,
             Constants.Keys.pingOnStartup: Constants.Defaults.pingOnStartup,
             Constants.Keys.claudeSessionKey: "",
+            Constants.Keys.claudeSessionKeyBackup: "",
             Constants.Keys.claudeOrgId: "",
             Constants.Keys.usagePollingSeconds: 300
         ])
@@ -112,6 +212,7 @@ class SettingsStore: ObservableObject {
         pingOnWake = defaults.bool(forKey: Constants.Keys.pingOnWake)
         pingOnStartup = defaults.bool(forKey: Constants.Keys.pingOnStartup)
         claudeSessionKey = defaults.string(forKey: Constants.Keys.claudeSessionKey) ?? ""
+        lastKnownGoodSessionKey = defaults.string(forKey: Constants.Keys.claudeSessionKeyBackup) ?? ""
         claudeOrgId = defaults.string(forKey: Constants.Keys.claudeOrgId) ?? ""
 
         // Migrate legacy usagePollingMinutes → usagePollingSeconds
@@ -129,6 +230,18 @@ class SettingsStore: ObservableObject {
         // resetWindowHours == 0 is valid (means "no window tracking"), only fix if never set
         if !defaults.contains(key: Constants.Keys.resetWindowHours) {
             resetWindowHours = Constants.Defaults.resetWindowHours
+        }
+
+        // Heal a credential a pre-fix build corrupted with a cookie-clear value (e.g. `""`).
+        // Property observers do not run during init, so this cannot be left to the didSet.
+        if !claudeSessionKey.isEmpty && !SessionKeyParser.isValid(claudeSessionKey) {
+            if SessionKeyParser.isValid(lastKnownGoodSessionKey) {
+                claudeSessionKey = lastKnownGoodSessionKey
+            } else {
+                claudeSessionKey = ""
+                // Nothing to fall back on — the user has to paste a fresh key, so say so.
+                authFailed = true
+            }
         }
     }
 

@@ -138,7 +138,10 @@ Format:
 
 If claude.ai issues a refreshed `sessionKey` cookie during a ping, the script
 silently writes the new value back to this file. (It does **not** rewrite the
-plist or override env vars.)
+plist or override env vars.) The refreshed value is validated first — claude.ai
+can answer a *successful* request with a cookie-clearing `sessionKey=""`, and
+saving that would overwrite your working credential. Anything that doesn't look
+like a key (`sk-ant-…`) is ignored with a warning on stderr.
 
 ### 3. macOS plist (zero-config on Macs that already use the GUI app)
 

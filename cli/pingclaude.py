@@ -61,6 +61,33 @@ MACOS_PLIST = os.path.expanduser(
     "~/Library/Preferences/com.pingclaude.app.plist"
 )
 
+SESSION_KEY_PREFIX = "sk-ant-"
+MIN_SESSION_KEY_LEN = 20
+
+
+def sanitize_session_key(raw: str) -> str:
+    """Trim, unwrap surrounding quotes, and drop a pasted `sessionKey=` prefix."""
+    val = (raw or "").strip()
+    if len(val) >= 2 and val[0] == '"' and val[-1] == '"':
+        val = val[1:-1].strip()
+    if val.startswith("sessionKey="):
+        val = val[len("sessionKey="):].strip()
+    if len(val) >= 2 and val[0] == '"' and val[-1] == '"':
+        val = val[1:-1].strip()
+    return val
+
+
+def is_valid_session_key(raw: str) -> bool:
+    """Whether a value looks like a credential rather than a cleared cookie.
+
+    claude.ai can answer a *successful* request with `sessionKey=""; Expires=<past>`
+    to clear the cookie. Persisting that overwrites a working credential and locks
+    the caller out until a fresh key is pasted in by hand.
+    """
+    val = sanitize_session_key(raw)
+    return val.startswith(SESSION_KEY_PREFIX) and len(val) >= MIN_SESSION_KEY_LEN
+
+
 # ---- config resolution -----------------------------------------------------
 
 
@@ -79,7 +106,7 @@ def load_config(explicit_path: str | None = None) -> tuple[Config | None, list[s
     """Return (config, attempted_sources). config is None if no source had creds."""
     attempted: list[str] = []
 
-    env_session = os.environ.get(ENV_SESSION_KEY, "").strip()
+    env_session = sanitize_session_key(os.environ.get(ENV_SESSION_KEY, ""))
     env_org = os.environ.get(ENV_ORG_ID, "").strip()
     attempted.append(f"env vars ({ENV_SESSION_KEY}, {ENV_ORG_ID})")
     if env_session and env_org:
@@ -94,7 +121,7 @@ def load_config(explicit_path: str | None = None) -> tuple[Config | None, list[s
             try:
                 with open(path, "r") as f:
                     data = json.load(f)
-                sk = (data.get("session_key") or "").strip()
+                sk = sanitize_session_key(data.get("session_key") or "")
                 org = (data.get("org_id") or "").strip()
                 if sk and org:
                     return Config(sk, org, "config", path), attempted
@@ -106,7 +133,7 @@ def load_config(explicit_path: str | None = None) -> tuple[Config | None, list[s
         try:
             with open(MACOS_PLIST, "rb") as f:
                 data = plistlib.load(f)
-            sk = (data.get("claudeSessionKey") or "").strip()
+            sk = sanitize_session_key(data.get("claudeSessionKey") or "")
             org = (data.get("claudeOrgId") or "").strip()
             if sk and org:
                 return Config(sk, org, "plist"), attempted
@@ -121,6 +148,12 @@ def save_session_key(config: Config, new_key: str) -> None:
     """Persist a refreshed session key — only when the config file was used."""
     if config.source != "config" or not config.config_path:
         return
+    # Never let a cleared or malformed cookie overwrite a working credential.
+    if not is_valid_session_key(new_key):
+        print("warning: ignoring an invalid refreshed session key from the server",
+              file=sys.stderr)
+        return
+    new_key = sanitize_session_key(new_key)
     try:
         with open(config.config_path, "r") as f:
             data = json.load(f)
