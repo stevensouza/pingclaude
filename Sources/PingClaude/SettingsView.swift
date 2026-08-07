@@ -162,12 +162,18 @@ struct SettingsView: View {
                             }
                         }
 
-                        HStack {
-                            Text("Org ID:")
-                                .frame(width: 70, alignment: .trailing)
-                            TextField("e.g. a1b2c3d4-e5f6-7890-...", text: $settings.claudeOrgId)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 11, design: .monospaced))
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text("Org ID:")
+                                    .frame(width: 70, alignment: .trailing)
+                                TextField("e.g. a1b2c3d4-e5f6-7890-...", text: $settings.claudeOrgId)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: 11, design: .monospaced))
+                            }
+                            Text("DevTools \u{2192} Network \u{2192} any /api/organizations/\u{2039}UUID\u{203A}/\u{2026} request URL")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                                .padding(.leading, 76)
                         }
 
                         VStack(alignment: .leading, spacing: 4) {
@@ -193,6 +199,10 @@ struct SettingsView: View {
                                     .font(.system(size: 10))
                                     .foregroundColor(.secondary)
                             }
+                            Text("DevTools \u{2192} Application (Chrome/Brave/Edge) or Storage (Safari/Firefox) \u{2192} Cookies \u{2192} claude.ai \u{2192} sessionKey")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                                .padding(.leading, 76)
                         }
 
                         if settings.authFailed {
@@ -266,21 +276,41 @@ struct SettingsView: View {
             Text("How to find your credentials")
                 .font(.system(size: 13, weight: .semibold))
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("1. Open claude.ai/settings/usage in your browser")
-                Text("2. Open DevTools: \u{2318}\u{2325}I (Cmd+Opt+I)")
-                Text("3. Click the Network tab, then refresh the page")
-                Text("4. Filter by \"usage\" \u{2014} click the request that appears")
+            Text("Sign in at claude.ai, then open DevTools: \u{2318}\u{2325}I (Cmd+Opt+I)")
+                .font(.system(size: 11))
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Session Key")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("1. Open the Application tab (Chrome / Brave / Edge) or the Storage tab (Safari / Firefox)")
+                Text("2. Expand Cookies and select https://claude.ai")
+                Text("3. Find the sessionKey row and copy its Value:")
             }
             .font(.system(size: 11))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("sessionKey    sk-ant-sid02-\u{2026}")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.blue.opacity(0.8))
+                Text("Copy the value only \u{2014} no \"sessionKey=\" prefix, no trailing semicolon. It auto-refreshes on each API call, so once entered it stays valid.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
 
             Divider()
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("Org ID")
                     .font(.system(size: 11, weight: .semibold))
-                Text("In the Headers tab, the Request URL looks like:")
-                    .font(.system(size: 11))
+                Text("1. Open the Network tab, then reload claude.ai")
+                Text("2. Filter by \"usage\" and click the request that appears")
+                Text("3. The Request URL looks like:")
+            }
+            .font(.system(size: 11))
+
+            VStack(alignment: .leading, spacing: 4) {
                 Text("https://claude.ai/api/organizations/\u{2039}UUID\u{203A}/usage")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.blue.opacity(0.8))
@@ -288,24 +318,9 @@ struct SettingsView: View {
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Session Key")
-                    .font(.system(size: 11, weight: .semibold))
-                Text("In the Cookie header (or response set-cookie), find:")
-                    .font(.system(size: 11))
-                Text("sessionKey=sk-ant-sid02-\u{2026};")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.blue.opacity(0.8))
-                Text("Copy the value after sessionKey= (not the semicolon). It auto-refreshes on each API call, so once entered it stays valid.")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-            }
         }
         .padding(16)
-        .frame(width: 360)
+        .frame(width: 380)
     }
 
     private func browseForCLI() {

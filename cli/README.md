@@ -31,9 +31,11 @@ use `sk-ant-...` API keys. Those won't work and aren't what governs the
 ### How to obtain `sessionKey` and `orgId`
 
 1. Sign in to <https://claude.ai> in your browser.
-2. Open dev tools (Cmd-Option-I / Ctrl-Shift-I) → **Application** →
-   **Cookies** → `https://claude.ai`. Copy the `sessionKey` value.
-3. Still in dev tools, open **Network**, send any message, and look at any
+2. Open dev tools (Cmd-Option-I / Ctrl-Shift-I) → **Application** (Chrome /
+   Brave / Edge) or **Storage** (Safari / Firefox) → **Cookies** →
+   `https://claude.ai`. Find the `sessionKey` row and copy its **Value**
+   column only — no `sessionKey=` prefix, no trailing semicolon.
+3. Still in dev tools, open **Network**, reload claude.ai, and look at any
    request URL containing `/api/organizations/<UUID>/...`. That UUID is your
    `orgId`.
 

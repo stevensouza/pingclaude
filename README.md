@@ -127,8 +127,8 @@ Settings, Ping History, and Claude Info share a single tabbed window. Opening an
 
 Enables three features: API-based pinging (no CLI needed), plan tier detection, and free usage polling (session %, weekly %, per-model breakdowns). Usage polling reads your account metrics without consuming any tokens or starting a session. If the usage API is temporarily unavailable, the app silently falls back to usage data from pings. Click the `?` icon in Settings for step-by-step setup instructions.
 
-- **Org ID** — Your organization UUID. Stays constant for your account.
-- **Session Key** — Your `sessionKey` cookie. Auto-refreshes on each API call, so once entered it stays valid. Refreshed values are validated before being saved: if claude.ai sends a cleared or malformed cookie, it is ignored and your existing key is kept. The last key that authenticated successfully is also kept as a backup and can be restored from the menu bar or Settings.
+- **Org ID** — Your organization UUID. Stays constant for your account. Find it in DevTools (`⌘⌥I`) → **Network** → reload claude.ai → any request whose URL contains `/api/organizations/<UUID>/…` — copy that UUID.
+- **Session Key** — Your `sessionKey` cookie. Find it in DevTools (`⌘⌥I`) → **Application** (Chrome/Brave/Edge) or **Storage** (Safari/Firefox) → **Cookies** → `https://claude.ai` → the `sessionKey` row. Copy the **Value** only, without the `sessionKey=` prefix or trailing semicolon. Auto-refreshes on each API call, so once entered it stays valid. Refreshed values are validated before being saved: if claude.ai sends a cleared or malformed cookie, it is ignored and your existing key is kept. The last key that authenticated successfully is also kept as a backup and can be restored from the menu bar or Settings.
 
 **Storage:**
 - **Log folder** — Where ping history is saved (default: `~/Library/Logs/PingClaude/`)

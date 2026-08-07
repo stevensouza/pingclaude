@@ -112,8 +112,14 @@ struct HelpView: View {
          configurable in the Schedule section of Settings (default: every 1 minute, \
          as low as 15 seconds).
 
-         To set up, click the ? icon in the Web API section of Settings \
-         for step-by-step instructions on finding your Org ID and Session Key.
+         To set up, sign in at claude.ai and open DevTools (\u{2318}\u{2325}I), then:
+         \u{2022} Session Key \u{2014} Application tab (Chrome/Brave/Edge) or Storage tab \
+         (Safari/Firefox) \u{2192} Cookies \u{2192} https://claude.ai \u{2192} copy the \
+         Value of the sessionKey row (no "sessionKey=" prefix, no trailing semicolon).
+         \u{2022} Org ID \u{2014} Network tab \u{2192} reload claude.ai \u{2192} click any \
+         request whose URL contains /api/organizations/\u{2039}UUID\u{203A}/ \u{2192} copy that UUID.
+
+         The same steps are in the ? icon in the Web API section of Settings.
 
          The Org ID never changes. The Session Key auto-refreshes on each poll, \
          so once entered it stays valid as long as the app keeps running.
