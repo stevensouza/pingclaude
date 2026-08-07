@@ -105,7 +105,18 @@ Check `canPingViaAPI` to determine which path. API mode requires `orgId` + `sess
 
 `UsageService` polls the claude.ai usage API on a configurable interval (default: 5 min) without consuming tokens. On API errors (429, network), it silently backs off with exponential delay (max 30 min) — no user-facing error display. Usage data is also set by `StatusBarController.updateUsageFromPing()` from each ping's `message_limit` SSE event. Both sources merge into `latestUsage`; whichever updates most recently wins. Plan tier is fetched separately at startup.
 
-**6. Reset-Triggered Ping**
+**6. Session Key Handling (all writes go through `SessionKeyParser`)**
+
+The session key auto-refreshes from `Set-Cookie` on API responses. claude.ai can answer a **200 OK** with a cookie-clearing `sessionKey=""; Expires=<past>`, so a naive parse will overwrite a working credential and lock the app out — this caused a real outage.
+
+Rules:
+- Never write `settingsStore.claudeSessionKey` directly from network code. Use `SettingsStore.applyRefreshedSessionKey(_:)`, which validates and ignores anything that isn't a credential.
+- Parse `Set-Cookie` only via `SessionKeyParser.extract(from:url:)` — it unquotes, rejects empty values and deletion directives (`Max-Age=0`, past `Expires`), requires an `sk-ant-` prefix, and handles folded multi-cookie headers.
+- Report every authenticated outcome: `noteAuthSucceeded()` on 200 (stashes the key as last-known-good), `noteAuthFailed(source:statusCode:)` on 401/403 (rolls back to the backup once, then sets `authFailed` for the menu bar alert).
+- API calls use `ClaudeAPISession.shared`, not `URLSession.shared` — cookie storage is disabled so the shared jar can't inject stale cookies alongside the manual `Cookie` header.
+- `hasUsageAPIConfig` requires a *valid* key, not merely a non-empty one.
+
+**7. Reset-Triggered Ping**
 
 When ping data reports a session reset time and utilization > 20%, `SchedulerService` automatically schedules a ping at the exact reset moment (with retry logic). Works independently of regular schedule.
 

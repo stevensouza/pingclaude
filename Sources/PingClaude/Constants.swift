@@ -24,6 +24,7 @@ enum Constants {
         static let pingOnWake = "pingOnWake"
         static let pingOnStartup = "pingOnStartup"
         static let claudeSessionKey = "claudeSessionKey"
+        static let claudeSessionKeyBackup = "claudeSessionKeyBackup"
         static let claudeOrgId = "claudeOrgId"
         static let usagePollingMinutes = "usagePollingMinutes" // legacy
         static let usagePollingSeconds = "usagePollingSeconds"

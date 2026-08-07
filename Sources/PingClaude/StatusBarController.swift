@@ -29,6 +29,9 @@ class StatusBarController {
     private var breakdownMenuItems: [NSMenuItem] = []
     private var velocityMenuItem: NSMenuItem!
     private var scheduleToggleMenuItem: NSMenuItem!
+    private var authAlertMenuItem: NSMenuItem!
+    private var authRestoreMenuItem: NSMenuItem!
+    private var authSeparatorMenuItem: NSMenuItem!
 
     private let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -61,6 +64,30 @@ class StatusBarController {
 
     private func setupMenu() {
         let menu = NSMenu()
+
+        // Auth alert — hidden unless the session key has been rejected. Kept at the very top so a
+        // silent credential failure cannot go unnoticed again.
+        authAlertMenuItem = NSMenuItem(
+            title: "\u{26A0} Session key expired \u{2014} click to update",
+            action: #selector(authAlertClicked),
+            keyEquivalent: ""
+        )
+        authAlertMenuItem.target = self
+        authAlertMenuItem.isHidden = true
+        menu.addItem(authAlertMenuItem)
+
+        authRestoreMenuItem = NSMenuItem(
+            title: "Restore last known-good session key",
+            action: #selector(authRestoreClicked),
+            keyEquivalent: ""
+        )
+        authRestoreMenuItem.target = self
+        authRestoreMenuItem.isHidden = true
+        menu.addItem(authRestoreMenuItem)
+
+        authSeparatorMenuItem = NSMenuItem.separator()
+        authSeparatorMenuItem.isHidden = true
+        menu.addItem(authSeparatorMenuItem)
 
         // Status info items (disabled, non-clickable)
         statusMenuItem = NSMenuItem(title: "Status: Idle", action: nil, keyEquivalent: "")
@@ -167,6 +194,16 @@ class StatusBarController {
     }
 
     private func setupObservers() {
+        // Watch session key auth failures
+        settingsStore.$authFailed
+            .receive(on: RunLoop.main)
+            .removeDuplicates()
+            .sink { [weak self] failed in
+                self?.updateAuthDisplay(failed)
+                self?.updateMenuBarIcon()
+            }
+            .store(in: &cancellables)
+
         // Watch ping status changes
         pingService.$currentStatus
             .receive(on: RunLoop.main)
@@ -262,9 +299,24 @@ class StatusBarController {
 
     // MARK: - Display Updates
 
+    private func updateAuthDisplay(_ authFailed: Bool) {
+        authAlertMenuItem.isHidden = !authFailed
+        authSeparatorMenuItem.isHidden = !authFailed
+        authRestoreMenuItem.isHidden = !(authFailed && settingsStore.canRestoreSessionKey)
+        if authFailed {
+            statusMenuItem.title = "Status: Session key expired"
+        }
+    }
+
     private func updateMenuBarIcon() {
         guard let button = statusItem.button else { return }
         let status = pingService.currentStatus
+
+        // A rejected credential outranks the transient ping states — it persists until fixed.
+        if settingsStore.authFailed && status != .pinging {
+            button.title = "CC\u{26A0}"
+            return
+        }
 
         switch status {
         case .pinging:
@@ -376,6 +428,11 @@ class StatusBarController {
     }
 
     private func updateStatusText(for status: PingStatus) {
+        // Don't let an idle transition bury a standing auth failure.
+        guard !settingsStore.authFailed else {
+            statusMenuItem.title = "Status: Session key expired"
+            return
+        }
         switch status {
         case .idle:
             statusMenuItem.title = "Status: Idle"
@@ -458,6 +515,17 @@ class StatusBarController {
     @objc private func settingsClicked() {
         ensureMainWindow()
         mainWindow?.show(tab: .settings)
+    }
+
+    @objc private func authAlertClicked() {
+        settingsClicked()
+    }
+
+    @objc private func authRestoreClicked() {
+        if settingsStore.restoreLastGoodSessionKey() {
+            logStore.log("Restored last known-good session key from the menu bar")
+            usageService.startPolling()
+        }
     }
 
     private func ensureMainWindow() {

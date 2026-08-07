@@ -115,7 +115,9 @@ class UsageService: ObservableObject {
     @Published var latestUsage: UsageData?
     @Published var planTier: PlanTier?
     private var planFetchAttempts: Int = 0
-    private var isUpdatingSessionKey = false
+    /// Key written by a server-side rotation, so the debounced config observer can tell that
+    /// change apart from a real settings edit.
+    private var suppressRestartForKey: String?
     private var consecutiveErrors: Int = 0
 
     private let isoFormatter: ISO8601DateFormatter = {
@@ -240,7 +242,7 @@ class UsageService: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(cookie, forHTTPHeaderField: "Cookie")
 
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        ClaudeAPISession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
 
@@ -258,7 +260,10 @@ class UsageService: ObservableObject {
 
                 if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
                     self.consecutiveErrors += 1
-                    self.logStore?.log("Usage API auth error: HTTP \(httpResponse.statusCode)")
+                    if self.settingsStore.noteAuthFailed(source: "Usage API", statusCode: httpResponse.statusCode) {
+                        // Rolled back to the last known-good key — retry once with it.
+                        self.fetchUsageData(orgId: orgId, cookie: "sessionKey=\(self.settingsStore.claudeSessionKey)")
+                    }
                     return
                 }
 
@@ -276,14 +281,8 @@ class UsageService: ObservableObject {
                     return
                 }
 
-                // Update session key if server sends a different one (without triggering polling restart)
-                if let setCookie = httpResponse.value(forHTTPHeaderField: "Set-Cookie"),
-                   let newKey = self.extractSessionKey(from: setCookie),
-                   newKey != self.settingsStore.claudeSessionKey {
-                    self.isUpdatingSessionKey = true
-                    self.settingsStore.claudeSessionKey = newKey
-                    self.isUpdatingSessionKey = false
-                }
+                self.settingsStore.noteAuthSucceeded()
+                self.applyRefreshedSessionKey(from: httpResponse)
 
                 // Log raw response for schema debugging (truncated to 500 chars)
                 let rawPreview = String(data: data, encoding: .utf8).map { String($0.prefix(500)) } ?? "<non-UTF8>"
@@ -376,7 +375,7 @@ class UsageService: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(cookie, forHTTPHeaderField: "Cookie")
 
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        ClaudeAPISession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.planFetchAttempts += 1
@@ -394,9 +393,14 @@ class UsageService: ObservableObject {
                 }
 
                 if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-                    self.logStore?.log("Plan API auth error: HTTP \(httpResponse.statusCode)")
                     NSLog("PingClaude: Plan fetch auth error (HTTP %d) — update session key", httpResponse.statusCode)
-                    self.planFetchAttempts = 3  // Stop retrying with bad credentials
+                    if self.settingsStore.noteAuthFailed(source: "Plan API", statusCode: httpResponse.statusCode) {
+                        // Rolled back to the last known-good key — retry once with it.
+                        self.planFetchAttempts -= 1
+                        self.fetchPlanInfo(orgId: orgId, cookie: "sessionKey=\(self.settingsStore.claudeSessionKey)")
+                    } else {
+                        self.planFetchAttempts = 3  // Stop retrying with bad credentials
+                    }
                     return
                 }
 
@@ -406,14 +410,8 @@ class UsageService: ObservableObject {
                     return
                 }
 
-                // Update session key if server sends a different one (without triggering polling restart)
-                if let setCookie = httpResponse.value(forHTTPHeaderField: "Set-Cookie"),
-                   let newKey = self.extractSessionKey(from: setCookie),
-                   newKey != self.settingsStore.claudeSessionKey {
-                    self.isUpdatingSessionKey = true
-                    self.settingsStore.claudeSessionKey = newKey
-                    self.isUpdatingSessionKey = false
-                }
+                self.settingsStore.noteAuthSucceeded()
+                self.applyRefreshedSessionKey(from: httpResponse)
 
                 do {
                     let decoded = try JSONDecoder().decode(OrgResponse.self, from: data)
@@ -435,15 +433,19 @@ class UsageService: ObservableObject {
         return isoFormatter.date(from: string) ?? isoFormatterNoFrac.date(from: string)
     }
 
-    private func extractSessionKey(from setCookie: String) -> String? {
-        let parts = setCookie.components(separatedBy: ";")
-        for part in parts {
-            let trimmed = part.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("sessionKey=") {
-                return String(trimmed.dropFirst("sessionKey=".count))
-            }
+    // MARK: - Session Key Lifecycle
+
+    /// Persist a refreshed session key from a response, if the server actually sent a usable one.
+    /// A cleared or malformed cookie is ignored so it cannot overwrite a working credential.
+    private func applyRefreshedSessionKey(from response: HTTPURLResponse) {
+        guard let setCookie = response.value(forHTTPHeaderField: "Set-Cookie") else { return }
+        guard let newKey = SessionKeyParser.extract(from: setCookie, url: response.url) else { return }
+
+        if settingsStore.applyRefreshedSessionKey(newKey) {
+            // A server-side rotation is not a config change — don't restart polling for it.
+            suppressRestartForKey = newKey
+            logStore?.log("Session key rotated by server")
         }
-        return nil
     }
 
     private func setupObservers() {
@@ -456,7 +458,13 @@ class UsageService: ObservableObject {
         .dropFirst()
         .debounce(for: .seconds(1), scheduler: RunLoop.main)
         .sink { [weak self] _, _, _ in
-            guard let self = self, !self.isUpdatingSessionKey else { return }
+            guard let self = self else { return }
+            // A token, not a flag: the sink is debounced by a second, so anything cleared
+            // synchronously at the write site is already gone by the time we get here.
+            if let suppressed = self.suppressRestartForKey {
+                self.suppressRestartForKey = nil
+                if suppressed == self.settingsStore.claudeSessionKey { return }
+            }
             self.startPolling()
         }
         .store(in: &cancellables)

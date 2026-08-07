@@ -40,6 +40,15 @@ struct PingResult {
 /// Simple error wrapper for API results
 struct PingError: Error {
     let message: String
+    /// Set for 401/403 — the session key was rejected, as opposed to a transport or server error.
+    var authStatusCode: Int?
+}
+
+/// What a ping learned about the session key, reported once on the main thread.
+enum PingAuthOutcome {
+    case unknown          // CLI ping, or a failure unrelated to auth
+    case succeeded
+    case failed(Int)
 }
 
 class PingService: ObservableObject {
@@ -105,6 +114,7 @@ class PingService: ObservableObject {
                     newSessionKey: nil,
                     apiURL: completionURL,
                     model: apiModel,
+                    authOutcome: error.authStatusCode.map { PingAuthOutcome.failed($0) } ?? .unknown,
                     completion: completion
                 )
                 return
@@ -138,10 +148,14 @@ class PingService: ObservableObject {
                         newSessionKey: self.extractSessionKeyValue(from: activeCookie),
                         apiURL: completionURL,
                         model: apiModel,
+                        authOutcome: error.authStatusCode.map { PingAuthOutcome.failed($0) } ?? .unknown,
                         completion: completion
                     )
 
                 case .success(let (responseText, usageData, latestCookie)):
+                    // Fall back to the key from step 1 — sendMessage often returns no Set-Cookie,
+                    // and dropping it would discard a legitimate refresh.
+                    let refreshedKey = latestCookie ?? self.extractSessionKeyValue(from: activeCookie)
                     self.finishPing(
                         startTime: startTime,
                         status: .success,
@@ -150,9 +164,10 @@ class PingService: ObservableObject {
                         errorMessage: nil,
                         method: .api,
                         usageData: usageData,
-                        newSessionKey: latestCookie,
+                        newSessionKey: refreshedKey,
                         apiURL: completionURL,
                         model: apiModel,
+                        authOutcome: .succeeded,
                         completion: completion
                     )
                 }
@@ -184,7 +199,7 @@ class PingService: ObservableObject {
         let semaphore = DispatchSemaphore(value: 0)
         var result: Result<String?, PingError> = .failure(PingError(message: "No response"))
 
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        ClaudeAPISession.shared.dataTask(with: request) { data, response, error in
             defer { semaphore.signal() }
 
             if let error = error {
@@ -198,7 +213,7 @@ class PingService: ObservableObject {
             }
 
             if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-                result = .failure(PingError(message: "Auth expired \u{2014} update session key"))
+                result = .failure(PingError(message: "Auth expired \u{2014} update session key", authStatusCode: httpResponse.statusCode))
                 return
             }
 
@@ -208,10 +223,10 @@ class PingService: ObservableObject {
                 return
             }
 
-            // Extract refreshed session key if present
+            // Extract refreshed session key if the server sent a usable one
             var newCookie: String? = nil
             if let setCookie = httpResponse.value(forHTTPHeaderField: "Set-Cookie"),
-               let newKey = self.extractSessionKey(from: setCookie) {
+               let newKey = SessionKeyParser.extract(from: setCookie, url: httpResponse.url) {
                 newCookie = "sessionKey=\(newKey)"
             }
 
@@ -259,7 +274,7 @@ class PingService: ObservableObject {
         let semaphore = DispatchSemaphore(value: 0)
         var result: Result<(String, PingUsageData?, String?), PingError> = .failure(PingError(message: "No response"))
 
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        ClaudeAPISession.shared.dataTask(with: request) { [weak self] data, response, error in
             defer { semaphore.signal() }
             guard let self = self else { return }
 
@@ -274,7 +289,7 @@ class PingService: ObservableObject {
             }
 
             if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
-                result = .failure(PingError(message: "Auth expired \u{2014} update session key"))
+                result = .failure(PingError(message: "Auth expired \u{2014} update session key", authStatusCode: httpResponse.statusCode))
                 return
             }
 
@@ -284,10 +299,10 @@ class PingService: ObservableObject {
                 return
             }
 
-            // Extract refreshed session key
+            // Extract refreshed session key if the server sent a usable one
             var newCookie: String? = nil
             if let setCookie = httpResponse.value(forHTTPHeaderField: "Set-Cookie"),
-               let newKey = self.extractSessionKey(from: setCookie) {
+               let newKey = SessionKeyParser.extract(from: setCookie, url: httpResponse.url) {
                 newCookie = newKey
             }
 
@@ -310,7 +325,7 @@ class PingService: ObservableObject {
         request.setValue(cookie, forHTTPHeaderField: "Cookie")
         request.timeoutInterval = 10
 
-        URLSession.shared.dataTask(with: request) { _, _, _ in }.resume()
+        ClaudeAPISession.shared.dataTask(with: request) { _, _, _ in }.resume()
     }
 
     // MARK: - SSE Parsing
@@ -533,6 +548,7 @@ class PingService: ObservableObject {
         newSessionKey: String?,
         apiURL: String? = nil,
         model: String? = nil,
+        authOutcome: PingAuthOutcome = .unknown,
         completion: @escaping (PingResult) -> Void
     ) {
         let duration = Date().timeIntervalSince(startTime)
@@ -551,9 +567,21 @@ class PingService: ObservableObject {
         )
 
         DispatchQueue.main.async {
-            // Update session key if refreshed
+            // Record the auth outcome before touching the key, so the key that actually
+            // authenticated is the one stashed as last-known-good.
+            switch authOutcome {
+            case .succeeded:
+                self.settingsStore.noteAuthSucceeded()
+            case .failed(let code):
+                self.settingsStore.noteAuthFailed(source: "Ping", statusCode: code)
+            case .unknown:
+                break
+            }
+
+            // Update session key only if the server sent a usable refresh — a cleared or
+            // malformed cookie must never overwrite a working credential.
             if let newKey = newSessionKey {
-                self.settingsStore.claudeSessionKey = newKey
+                self.settingsStore.applyRefreshedSessionKey(newKey)
             }
 
             self.currentStatus = status
@@ -569,17 +597,6 @@ class PingService: ObservableObject {
                 }
             }
         }
-    }
-
-    func extractSessionKey(from setCookie: String) -> String? {
-        let parts = setCookie.components(separatedBy: ";")
-        for part in parts {
-            let trimmed = part.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("sessionKey=") {
-                return String(trimmed.dropFirst("sessionKey=".count))
-            }
-        }
-        return nil
     }
 
     /// Extract the raw session key value from a "sessionKey=sk-ant-..." cookie string

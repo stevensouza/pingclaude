@@ -128,7 +128,7 @@ Settings, Ping History, and Claude Info share a single tabbed window. Opening an
 Enables three features: API-based pinging (no CLI needed), plan tier detection, and free usage polling (session %, weekly %, per-model breakdowns). Usage polling reads your account metrics without consuming any tokens or starting a session. If the usage API is temporarily unavailable, the app silently falls back to usage data from pings. Click the `?` icon in Settings for step-by-step setup instructions.
 
 - **Org ID** — Your organization UUID. Stays constant for your account.
-- **Session Key** — Your `sessionKey` cookie. Auto-refreshes on each API call, so once entered it stays valid.
+- **Session Key** — Your `sessionKey` cookie. Auto-refreshes on each API call, so once entered it stays valid. Refreshed values are validated before being saved: if claude.ai sends a cleared or malformed cookie, it is ignored and your existing key is kept. The last key that authenticated successfully is also kept as a backup and can be restored from the menu bar or Settings.
 
 **Storage:**
 - **Log folder** — Where ping history is saved (default: `~/Library/Logs/PingClaude/`)
@@ -267,6 +267,9 @@ Ping history is stored as JSON (`ping_history.json`):
 When the total log size exceeds the configured maximum (default 10 MB), the oldest half of records are automatically pruned.
 
 ## Troubleshooting
+
+**Menu bar shows `CC⚠` and every ping fails with "Auth expired":**
+Your session key has been rejected. Open the menu and click **⚠ Session key expired — click to update** to jump straight to Settings, then paste a fresh `sessionKey` from your browser (DevTools → Application → Cookies → `https://claude.ai`, copy the value only, without the `sessionKey=` prefix). If the app has a backup of the last key that worked, **Restore last known-good session key** appears in the menu as a one-click alternative.
 
 **Plan shows "--" in the menu:**
 Your Claude Web API credentials (Org ID and Session Key) may be missing or expired. Check Settings → Claude Web API. Credentials are stored in UserDefaults, which are machine-specific — they don't transfer when you clone the repo to a new computer.

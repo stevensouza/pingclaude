@@ -22,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Initialize services
         settingsStore = SettingsStore()
         logStore = LogStore(settingsStore: settingsStore)
+        settingsStore.logStore = logStore
         pingHistoryStore = PingHistoryStore(settingsStore: settingsStore)
         pingService = PingService(settingsStore: settingsStore)
         usageService = UsageService(settingsStore: settingsStore, logStore: logStore)
